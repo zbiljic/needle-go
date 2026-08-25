@@ -76,7 +76,7 @@ func TestHelpAndMissingCommand(t *testing.T) {
 	if code := app.run(context.Background(), []string{"help"}); code != 0 {
 		t.Fatalf("help exit code = %d", code)
 	}
-	if !strings.Contains(stderr.String(), "needlez doctor") && !strings.Contains(stderr.String(), "doctor") {
+	if !strings.Contains(stderr.String(), "doctor") || !strings.Contains(stderr.String(), "test") {
 		t.Fatalf("help output = %q", stderr.String())
 	}
 
@@ -256,6 +256,112 @@ func TestDoctorMissingLibrary(t *testing.T) {
 	if !strings.Contains(stdout.String(), "✗ Library: not found") ||
 		!strings.Contains(stderr.String(), "needlez fetch") {
 		t.Fatalf("doctor stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestConformance(t *testing.T) {
+	t.Parallel()
+
+	weatherCall := func(city, day string) needle.Response {
+		arguments, err := json.Marshal(map[string]string{"city": city, "day": day})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return needle.Response{
+			Type:    needle.ResponseCall,
+			Success: true,
+			FunctionCalls: []needle.FunctionCall{{
+				Name:      "get_weather",
+				Arguments: arguments,
+			}},
+		}
+	}
+	respond := needle.Response{Type: needle.ResponseRespond, Success: true}
+	weatherAgents := 0
+	var configs []needle.Config
+
+	app, stdout, stderr := testApplication("")
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+		configs = append(configs, config)
+		if len(config.Tools) == 0 {
+			return &fakeAgent{responses: []needle.Response{{Type: needle.ResponseCall, Success: true}}}, nil
+		}
+		switch config.Tools[0].Schema.Name {
+		case "invoice":
+			return &fakeAgent{responses: []needle.Response{{
+				Type:    needle.ResponseCall,
+				Success: true,
+				FunctionCalls: []needle.FunctionCall{{
+					Name: "invoice",
+					Arguments: json.RawMessage(
+						`{"vendor":"Acme Corp","total":1200,"due_date":"2026-09-01"}`,
+					),
+				}},
+			}}}, nil
+		case "get_weather":
+			if config.System != "" {
+				return &fakeAgent{responses: []needle.Response{weatherCall("London", "today")}}, nil
+			}
+			weatherAgents++
+			switch weatherAgents {
+			case 1:
+				return &fakeAgent{responses: []needle.Response{weatherCall("Tokyo", "tomorrow")}}, nil
+			case 2:
+				return &fakeAgent{responses: []needle.Response{weatherCall("Paris", "tomorrow"), respond}}, nil
+			case 3:
+				return &fakeAgent{responses: []needle.Response{
+					weatherCall("Paris", "tomorrow"),
+					respond,
+					weatherCall("Paris", "tomorrow"),
+				}}, nil
+			}
+		}
+		return nil, errors.New("unexpected conformance configuration")
+	}
+
+	code := app.run(context.Background(), []string{
+		"test",
+		"--library", "/tmp/libneedle",
+		"--cache", "/tmp/needle-cache",
+		"--buffer-size", "4096",
+	})
+	if code != 0 {
+		t.Fatalf("test exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "ALL 6 CHECKS PASSED") ||
+		!strings.Contains(stdout.String(), "structured extraction") {
+		t.Fatalf("test output = %q", stdout.String())
+	}
+	if len(configs) != 6 {
+		t.Fatalf("agent configs = %d, want 6", len(configs))
+	}
+	for _, config := range configs {
+		if config.LibraryPath != "/tmp/libneedle" ||
+			config.CacheDir != "/tmp/needle-cache" ||
+			config.BufferSize != 4096 {
+			t.Fatalf("agent config = %#v", config)
+		}
+	}
+}
+
+func TestConformanceFailure(t *testing.T) {
+	t.Parallel()
+
+	app, stdout, stderr := testApplication("")
+	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+		return nil, errors.New("broken runtime")
+	}
+	if code := app.run(context.Background(), []string{"test"}); code != 1 {
+		t.Fatalf("test exit code = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "6 OF 6 CHECKS FAILED") ||
+		!strings.Contains(stderr.String(), "conformance checks failed") {
+		t.Fatalf("test stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+
+	app, _, _ = testApplication("")
+	if code := app.run(context.Background(), []string{"test", "unexpected"}); code != 2 {
+		t.Fatalf("test usage exit code = %d", code)
 	}
 }
 

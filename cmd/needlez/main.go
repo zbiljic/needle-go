@@ -77,6 +77,8 @@ func (a *application) run(ctx context.Context, args []string) int {
 		err = a.runComplete(ctx, args[1:])
 	case "repl":
 		err = a.runREPL(ctx, args[1:])
+	case "test":
+		err = a.runTest(ctx, args[1:])
 	case "doctor":
 		err = a.runDoctor(ctx, args[1:])
 	case "version":
@@ -105,6 +107,7 @@ Commands:
   fetch       Download and verify a native Needle engine
   complete    Perform one raw model completion
   repl        Exercise a persistent model session interactively
+  test        Run behavioral conformance checks against the model
   doctor      Diagnose the local engine installation
   version     Print CLI, engine, and platform versions
 

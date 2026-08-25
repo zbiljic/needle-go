@@ -81,6 +81,7 @@ The optional `needlez` command can fetch the engine and verify that it loads:
 ```sh
 go run github.com/zbiljic/needle-go/cmd/needlez@latest fetch
 go run github.com/zbiljic/needle-go/cmd/needlez@latest doctor --smoke
+go run github.com/zbiljic/needle-go/cmd/needlez@latest test
 ```
 
 ## Examples
