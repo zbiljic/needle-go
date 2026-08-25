@@ -99,3 +99,6 @@ jobs:
 
       - name: Run native smoke test
         run: go run ./cmd/needlez doctor --smoke
+
+      - name: Run native conformance tests
+        run: go run ./cmd/needlez test
