@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -32,12 +31,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if response.Type != needle.ResponseCall || len(response.FunctionCalls) == 0 {
-		log.Fatalf("no invoice extracted: type=%s", response.Type)
-	}
-
-	var extracted invoice
-	if err := json.Unmarshal(response.FunctionCalls[0].Arguments, &extracted); err != nil {
+	extracted, err := needle.Extract[invoice](response)
+	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("vendor: %s\n", extracted.Vendor)
