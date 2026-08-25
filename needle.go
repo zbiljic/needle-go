@@ -1,4 +1,4 @@
-// Package needle defines Go interfaces and types for the Needle tool-calling model.
+// Package needle provides Go access to the Needle tool-calling model.
 package needle
 
 import (
@@ -11,6 +11,8 @@ const (
 	DefaultMaxSteps = 8
 	// DefaultMaxNewTokens is the default generation limit for each completion.
 	DefaultMaxNewTokens = 256
+	// DefaultBufferSize is the default native response buffer size.
+	DefaultBufferSize = 64 * 1024
 )
 
 // ResponseType identifies the action returned by Needle.
@@ -60,6 +62,21 @@ type ToolHandler func(context.Context, json.RawMessage) (any, error)
 type Tool struct {
 	Schema  ToolSchema
 	Handler ToolHandler
+}
+
+// Config configures an Agent.
+type Config struct {
+	Tools         []Tool
+	System        string
+	WeightsPath   string
+	ToolIndexPath string
+	BufferSize    int
+
+	// LibraryPath selects an existing Needle shared library. When empty, New
+	// checks NEEDLE_LIB_PATH and then fetches the engine for this platform.
+	LibraryPath string
+	// CacheDir overrides the engine download directory.
+	CacheDir string
 }
 
 // Agent defines the Needle conversation lifecycle.
