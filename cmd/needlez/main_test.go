@@ -76,7 +76,9 @@ func TestHelpAndMissingCommand(t *testing.T) {
 	if code := app.run(context.Background(), []string{"help"}); code != 0 {
 		t.Fatalf("help exit code = %d", code)
 	}
-	if !strings.Contains(stderr.String(), "doctor") || !strings.Contains(stderr.String(), "test") {
+	if !strings.Contains(stderr.String(), "doctor") ||
+		!strings.Contains(stderr.String(), "eval") ||
+		!strings.Contains(stderr.String(), "test") {
 		t.Fatalf("help output = %q", stderr.String())
 	}
 

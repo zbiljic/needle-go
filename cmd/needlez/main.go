@@ -75,6 +75,8 @@ func (a *application) run(ctx context.Context, args []string) int {
 		err = a.runFetch(ctx, args[1:])
 	case "complete":
 		err = a.runComplete(ctx, args[1:])
+	case "eval":
+		err = a.runEval(ctx, args[1:])
 	case "repl":
 		err = a.runREPL(ctx, args[1:])
 	case "test":
@@ -106,6 +108,7 @@ func (a *application) printUsage() {
 Commands:
   fetch       Download and verify a native Needle engine
   complete    Perform one raw model completion
+  eval        Evaluate a tool set against JSONL prompt cases
   repl        Exercise a persistent model session interactively
   test        Run behavioral conformance checks against the model
   doctor      Diagnose the local engine installation
@@ -174,7 +177,6 @@ type agentOptions struct {
 	toolIndex   string
 	bufferSize  int
 	maxTokens   int
-	pretty      bool
 }
 
 func addAgentFlags(flags *flag.FlagSet, options *agentOptions) {
@@ -187,7 +189,6 @@ func addAgentFlags(flags *flag.FlagSet, options *agentOptions) {
 	flags.StringVar(&options.toolIndex, "tool-index", "", "path to persistent tool embeddings")
 	flags.IntVar(&options.bufferSize, "buffer-size", 0, "native response buffer size")
 	flags.IntVar(&options.maxTokens, "max-tokens", needle.DefaultMaxNewTokens, "response token limit")
-	flags.BoolVar(&options.pretty, "pretty", false, "indent response JSON")
 }
 
 func (a *application) agentConfig(options agentOptions) (needle.Config, error) {
@@ -232,6 +233,7 @@ func (a *application) runComplete(ctx context.Context, args []string) error {
 	flags := a.flagSet("Perform one model turn and print its response envelope.", "complete [options] [prompt]")
 	var options agentOptions
 	addAgentFlags(flags, &options)
+	pretty := flags.Bool("pretty", false, "indent response JSON")
 	promptFlag := flags.String("prompt", "", "input prompt; alternatively use arguments or stdin")
 	if err := parseFlags(flags, args); err != nil {
 		return err
@@ -265,13 +267,14 @@ func (a *application) runComplete(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("complete: %w", err)
 	}
-	return writeJSON(a.stdout, response, options.pretty)
+	return writeJSON(a.stdout, response, *pretty)
 }
 
 func (a *application) runREPL(ctx context.Context, args []string) error {
 	flags := a.flagSet("Run a persistent manual completion session.", "repl [options]")
 	var options agentOptions
 	addAgentFlags(flags, &options)
+	pretty := flags.Bool("pretty", false, "indent response JSON")
 	if err := parseFlags(flags, args); err != nil {
 		return err
 	}
@@ -320,7 +323,7 @@ func (a *application) runREPL(ctx context.Context, args []string) error {
 		if err != nil {
 			return fmt.Errorf("complete: %w", err)
 		}
-		if err := writeJSON(a.stdout, response, options.pretty); err != nil {
+		if err := writeJSON(a.stdout, response, *pretty); err != nil {
 			return err
 		}
 	}
