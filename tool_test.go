@@ -10,7 +10,8 @@ import (
 )
 
 type typedToolArguments struct {
-	City string `json:"city"`
+	City  string `json:"city" jsonschema:"description=City whose weather should be returned."`
+	Units string `json:"units,omitempty" jsonschema:"enum=celsius,enum=fahrenheit"`
 }
 
 type typedToolResult struct {
@@ -21,11 +22,7 @@ func TestNewTool(t *testing.T) {
 	t.Parallel()
 
 	type contextKey struct{}
-	schema := ToolSchema{
-		Name:       "weather",
-		Parameters: map[string]any{"type": "object"},
-	}
-	tool := NewTool(schema, func(ctx context.Context, arguments typedToolArguments) (typedToolResult, error) {
+	tool := NewTool("weather", "Get the weather.", func(ctx context.Context, arguments typedToolArguments) (typedToolResult, error) {
 		if got := ctx.Value(contextKey{}); got != "request" {
 			t.Fatalf("context value = %v, want request", got)
 		}
@@ -35,8 +32,8 @@ func TestNewTool(t *testing.T) {
 		return typedToolResult{Temperature: 27}, nil
 	})
 
-	if !reflect.DeepEqual(tool.Schema, schema) {
-		t.Fatalf("schema = %#v, want %#v", tool.Schema, schema)
+	if tool.Schema.Name != "weather" || tool.Schema.Description != "Get the weather." {
+		t.Fatalf("schema = %#v", tool.Schema)
 	}
 	result, err := tool.Handler(
 		context.WithValue(context.Background(), contextKey{}, "request"),
@@ -84,7 +81,7 @@ func TestNewToolErrors(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			tool := NewTool(ToolSchema{Name: "weather"}, test.handler)
+			tool := NewTool("weather", "", test.handler)
 			_, err := tool.Handler(context.Background(), test.raw)
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("handler error = %v, want containing %q", err, test.wantError)
@@ -99,10 +96,9 @@ func TestNewToolErrors(t *testing.T) {
 func TestNewToolWithoutHandler(t *testing.T) {
 	t.Parallel()
 
-	schema := ToolSchema{Name: "invoice"}
-	tool := NewTool[typedToolArguments, typedToolResult](schema, nil)
-	if !reflect.DeepEqual(tool.Schema, schema) {
-		t.Fatalf("schema = %#v, want %#v", tool.Schema, schema)
+	tool := NewTool[typedToolArguments, typedToolResult]("invoice", "Extract an invoice.", nil)
+	if tool.Schema.Name != "invoice" || tool.Schema.Parameters == nil {
+		t.Fatalf("schema = %#v", tool.Schema)
 	}
 	if tool.Handler != nil {
 		t.Fatal("handler is not nil")

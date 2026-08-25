@@ -6,15 +6,16 @@ import (
 	"fmt"
 )
 
-// NewTool builds a Tool from a schema and a typed Go handler. Arguments are
-// decoded from the model's JSON object before the handler is called.
+// NewTool builds a Tool whose parameter schema is derived from Arguments.
+// Model-produced JSON arguments are decoded before the typed handler is called.
 //
 // A nil handler produces a schema-only tool suitable for use with Complete.
 func NewTool[Arguments, Result any](
-	schema ToolSchema,
+	name string,
+	description string,
 	handler func(context.Context, Arguments) (Result, error),
 ) Tool {
-	tool := Tool{Schema: schema}
+	tool := Tool{Schema: SchemaFor[Arguments](name, description)}
 	if handler == nil {
 		return tool
 	}
@@ -22,7 +23,7 @@ func NewTool[Arguments, Result any](
 	tool.Handler = func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var arguments Arguments
 		if err := json.Unmarshal(raw, &arguments); err != nil {
-			return nil, fmt.Errorf("needle: decode arguments for tool %q: %w", schema.Name, err)
+			return nil, fmt.Errorf("needle: decode arguments for tool %q: %w", name, err)
 		}
 		return handler(ctx, arguments)
 	}

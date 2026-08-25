@@ -11,7 +11,7 @@ import (
 )
 
 type weatherArguments struct {
-	City string `json:"city"`
+	City string `json:"city" jsonschema:"description=City whose weather should be returned."`
 }
 
 type weatherResult struct {
@@ -51,20 +51,8 @@ func main() {
 
 func weatherTool() needle.Tool {
 	return needle.NewTool(
-		needle.ToolSchema{
-			Name:        "get_weather",
-			Description: "Get the current weather for a city.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"city": map[string]any{
-						"type":        "string",
-						"description": "City whose weather should be returned.",
-					},
-				},
-				"required": []string{"city"},
-			},
-		},
+		"get_weather",
+		"Get the current weather for a city.",
 		func(_ context.Context, arguments weatherArguments) (weatherResult, error) {
 			if arguments.City == "" {
 				return weatherResult{}, errors.New("city is required")

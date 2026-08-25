@@ -10,13 +10,16 @@ import (
 )
 
 type contactArguments struct {
-	Name string `json:"name"`
+	Name string `json:"name" jsonschema:"description=Full or partial contact name."`
 }
 
 func main() {
 	ctx := context.Background()
 	agent, err := needle.New(ctx, needle.Config{
-		Tools: []needle.Tool{{Schema: contactSchema()}},
+		Tools: []needle.Tool{{Schema: needle.SchemaFor[contactArguments](
+			"search_contacts",
+			"Find a person in the user's contacts.",
+		)}},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -49,21 +52,4 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Printf("final response: %s\n", response.Type)
-}
-
-func contactSchema() needle.ToolSchema {
-	return needle.ToolSchema{
-		Name:        "search_contacts",
-		Description: "Find a person in the user's contacts.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"name": map[string]any{
-					"type":        "string",
-					"description": "Full or partial contact name.",
-				},
-			},
-			"required": []string{"name"},
-		},
-	}
 }

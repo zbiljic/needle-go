@@ -9,15 +9,18 @@ import (
 )
 
 type invoice struct {
-	Vendor  string  `json:"vendor"`
-	Total   float64 `json:"total"`
-	DueDate string  `json:"due_date"`
+	Vendor  string  `json:"vendor" jsonschema:"description=Company that issued the invoice."`
+	Total   float64 `json:"total" jsonschema:"description=Total invoice amount."`
+	DueDate string  `json:"due_date" jsonschema:"description=Payment due date in YYYY-MM-DD format."`
 }
 
 func main() {
 	ctx := context.Background()
 	agent, err := needle.New(ctx, needle.Config{
-		Tools: []needle.Tool{{Schema: invoiceSchema()}},
+		Tools: []needle.Tool{{Schema: needle.SchemaFor[invoice](
+			"invoice",
+			"A purchase invoice extracted from text.",
+		)}},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -40,30 +43,5 @@ func main() {
 	fmt.Printf("due: %s\n", extracted.DueDate)
 	if response.Confidence != nil {
 		fmt.Printf("confidence: %.2f\n", *response.Confidence)
-	}
-}
-
-func invoiceSchema() needle.ToolSchema {
-	return needle.ToolSchema{
-		Name:        "invoice",
-		Description: "A purchase invoice extracted from text.",
-		Parameters: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vendor": map[string]any{
-					"type":        "string",
-					"description": "Company that issued the invoice.",
-				},
-				"total": map[string]any{
-					"type":        "number",
-					"description": "Total invoice amount.",
-				},
-				"due_date": map[string]any{
-					"type":        "string",
-					"description": "Payment due date in YYYY-MM-DD format.",
-				},
-			},
-			"required": []string{"vendor", "total", "due_date"},
-		},
 	}
 }
