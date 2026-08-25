@@ -50,8 +50,8 @@ func main() {
 }
 
 func weatherTool() needle.Tool {
-	return needle.Tool{
-		Schema: needle.ToolSchema{
+	return needle.NewTool(
+		needle.ToolSchema{
 			Name:        "get_weather",
 			Description: "Get the current weather for a city.",
 			Parameters: map[string]any{
@@ -65,13 +65,9 @@ func weatherTool() needle.Tool {
 				"required": []string{"city"},
 			},
 		},
-		Handler: func(_ context.Context, raw json.RawMessage) (any, error) {
-			var arguments weatherArguments
-			if err := json.Unmarshal(raw, &arguments); err != nil {
-				return nil, fmt.Errorf("decode arguments: %w", err)
-			}
+		func(_ context.Context, arguments weatherArguments) (weatherResult, error) {
 			if arguments.City == "" {
-				return nil, errors.New("city is required")
+				return weatherResult{}, errors.New("city is required")
 			}
 			return weatherResult{
 				City:        arguments.City,
@@ -79,5 +75,5 @@ func weatherTool() needle.Tool {
 				Conditions:  "clear",
 			}, nil
 		},
-	}
+	)
 }
