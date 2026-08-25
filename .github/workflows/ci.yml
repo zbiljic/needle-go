@@ -30,6 +30,8 @@ jobs:
     name: Run Checks
     runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
+    env:
+      CGO_ENABLED: "0"
 
     steps:
       - name: Checkout
