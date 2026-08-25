@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -15,7 +16,12 @@ import (
 	needle "github.com/zbiljic/needle-go"
 )
 
-const evalInputDisplayLimit = 64
+const (
+	evalInputDisplayLimit         = 64
+	evaluationFormatJSON          = "json"
+	evaluationFormatText          = "text"
+	evaluationReportSchemaVersion = 1
+)
 
 type evaluationCase struct {
 	input string
@@ -37,6 +43,41 @@ type evaluationResult struct {
 	confidence *float64
 }
 
+type evaluationReport struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Cases         []evaluationCaseReport `json:"cases"`
+	Summary       evaluationSummary      `json:"summary"`
+}
+
+type evaluationCaseReport struct {
+	Index        int                           `json:"index"`
+	Input        string                        `json:"input"`
+	Want         []evaluationReportExpectation `json:"want"`
+	Response     needle.Response               `json:"response"`
+	CallResponse bool                          `json:"call_response"`
+	NameMatch    bool                          `json:"name_match"`
+	ExactMatch   bool                          `json:"exact_match"`
+	DurationMS   int64                         `json:"duration_ms"`
+	textResult   evaluationResult
+}
+
+type evaluationReportExpectation struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+type evaluationSummary struct {
+	Total             int      `json:"total"`
+	CallResponses     int      `json:"call_responses"`
+	NameMatches       int      `json:"name_matches"`
+	ExactMatches      int      `json:"exact_matches"`
+	Score             float64  `json:"score"`
+	MinimumScore      float64  `json:"minimum_score"`
+	Passed            bool     `json:"passed"`
+	AverageConfidence *float64 `json:"average_confidence"`
+	DurationMS        int64    `json:"duration_ms"`
+}
+
 func (a *application) runEval(ctx context.Context, args []string) error {
 	flags := a.flagSet(
 		`Evaluate a tool set against isolated JSONL prompt cases.
@@ -48,6 +89,7 @@ names or objects with "name" and exact "arguments" fields.`,
 	var options agentOptions
 	addAgentFlags(flags, &options)
 	casesPath := flags.String("cases", "", "path to JSONL evaluation cases")
+	outputFormat := flags.String("format", evaluationFormatText, "output format: text or json")
 	minScore := flags.Float64("min-score", 0, "minimum exact-match score required for success (0 disables)")
 	if err := parseFlags(flags, args); err != nil {
 		return err
@@ -63,6 +105,9 @@ names or objects with "name" and exact "arguments" fields.`,
 	}
 	if *minScore < 0 || *minScore > 1 {
 		return usageError{errors.New("--min-score must be between 0 and 1")}
+	}
+	if *outputFormat != evaluationFormatText && *outputFormat != evaluationFormatJSON {
+		return usageError{errors.New(`--format must be "text" or "json"`)}
 	}
 
 	cases, err := readEvaluationCases(*casesPath)
@@ -84,7 +129,13 @@ names or objects with "name" and exact "arguments" fields.`,
 	started := time.Now()
 	callCount, nameCount, exactCount := 0, 0, 0
 	confidenceTotal, confidenceCount := 0.0, 0
-	fmt.Fprintf(a.stdout, "Needle evaluation: %d cases\n", len(cases))
+	report := evaluationReport{
+		SchemaVersion: evaluationReportSchemaVersion,
+		Cases:         make([]evaluationCaseReport, 0, len(cases)),
+	}
+	if *outputFormat == evaluationFormatText {
+		fmt.Fprintf(a.stdout, "Needle evaluation: %d cases\n", len(cases))
+	}
 	for index, evaluation := range cases {
 		if err := agent.Reset(ctx); err != nil {
 			return fmt.Errorf("case %d reset: %w", index+1, err)
@@ -94,6 +145,7 @@ names or objects with "name" and exact "arguments" fields.`,
 		if err != nil {
 			return fmt.Errorf("case %d complete: %w", index+1, err)
 		}
+		caseDuration := time.Since(caseStarted)
 		result := evaluateResponse(response, evaluation.want)
 		if result.call {
 			callCount++
@@ -104,49 +156,106 @@ names or objects with "name" and exact "arguments" fields.`,
 		if result.exact {
 			exactCount++
 		}
-		confidence := "-"
 		if result.confidence != nil {
-			confidence = fmt.Sprintf("%.2f", *result.confidence)
 			confidenceTotal += *result.confidence
 			confidenceCount++
 		}
-		status := "✗"
-		if result.exact {
-			status = "✓"
+		caseReport := evaluationCaseReport{
+			Index:        index + 1,
+			Input:        evaluation.input,
+			Want:         reportExpectations(evaluation.want),
+			Response:     response,
+			CallResponse: result.call,
+			NameMatch:    result.name,
+			ExactMatch:   result.exact,
+			DurationMS:   caseDuration.Milliseconds(),
+			textResult:   result,
 		}
-		fmt.Fprintf(
-			a.stdout,
-			"%s %d %q -> %s (conf %s, %s)%s\n",
-			status,
-			index+1,
-			displayInput(evaluation.input),
-			result.actual,
-			confidence,
-			time.Since(caseStarted).Round(time.Millisecond),
-			result.detail,
-		)
+		report.Cases = append(report.Cases, caseReport)
+		if *outputFormat == evaluationFormatText {
+			writeTextEvaluationCase(a.stdout, caseReport, caseDuration)
+		}
 	}
 
 	score := float64(exactCount) / float64(len(cases))
-	fmt.Fprintf(
-		a.stdout,
-		"calls %d/%d, names %d/%d, exact %d/%d, score %.3f",
-		callCount,
-		len(cases),
-		nameCount,
-		len(cases),
-		exactCount,
-		len(cases),
-		score,
-	)
-	if confidenceCount != 0 {
-		fmt.Fprintf(a.stdout, ", confidence %.2f", confidenceTotal/float64(confidenceCount))
+	passed := *minScore == 0 || score+1e-12 >= *minScore
+	report.Summary = evaluationSummary{
+		Total:         len(cases),
+		CallResponses: callCount,
+		NameMatches:   nameCount,
+		ExactMatches:  exactCount,
+		Score:         score,
+		MinimumScore:  *minScore,
+		Passed:        passed,
+		DurationMS:    time.Since(started).Milliseconds(),
 	}
-	fmt.Fprintf(a.stdout, ", %s\n", time.Since(started).Round(time.Millisecond))
-	if *minScore > 0 && score+1e-12 < *minScore {
+	if confidenceCount != 0 {
+		average := confidenceTotal / float64(confidenceCount)
+		report.Summary.AverageConfidence = &average
+	}
+	if *outputFormat == evaluationFormatJSON {
+		if err := writeJSON(a.stdout, report, false); err != nil {
+			return err
+		}
+	} else {
+		writeTextEvaluationSummary(a.stdout, report.Summary)
+	}
+	if !passed {
 		return fmt.Errorf("exact-match score %.3f is below --min-score %.3f", score, *minScore)
 	}
 	return nil
+}
+
+func reportExpectations(want []evaluationExpectation) []evaluationReportExpectation {
+	expectations := make([]evaluationReportExpectation, 0, len(want))
+	for _, expectation := range want {
+		reported := evaluationReportExpectation{Name: expectation.name}
+		if expectation.hasArguments {
+			reported.Arguments = append(json.RawMessage(nil), expectation.arguments...)
+		}
+		expectations = append(expectations, reported)
+	}
+	return expectations
+}
+
+func writeTextEvaluationCase(output io.Writer, report evaluationCaseReport, duration time.Duration) {
+	confidence := "-"
+	if report.textResult.confidence != nil {
+		confidence = fmt.Sprintf("%.2f", *report.textResult.confidence)
+	}
+	status := "✗"
+	if report.ExactMatch {
+		status = "✓"
+	}
+	fmt.Fprintf(
+		output,
+		"%s %d %q -> %s (conf %s, %s)%s\n",
+		status,
+		report.Index,
+		displayInput(report.Input),
+		report.textResult.actual,
+		confidence,
+		duration.Round(time.Millisecond),
+		report.textResult.detail,
+	)
+}
+
+func writeTextEvaluationSummary(output io.Writer, summary evaluationSummary) {
+	fmt.Fprintf(
+		output,
+		"calls %d/%d, names %d/%d, exact %d/%d, score %.3f",
+		summary.CallResponses,
+		summary.Total,
+		summary.NameMatches,
+		summary.Total,
+		summary.ExactMatches,
+		summary.Total,
+		summary.Score,
+	)
+	if summary.AverageConfidence != nil {
+		fmt.Fprintf(output, ", confidence %.2f", *summary.AverageConfidence)
+	}
+	fmt.Fprintf(output, ", %s\n", time.Duration(summary.DurationMS)*time.Millisecond)
 }
 
 func readEvaluationCases(path string) ([]evaluationCase, error) {

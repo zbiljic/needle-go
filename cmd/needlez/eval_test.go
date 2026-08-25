@@ -164,6 +164,87 @@ func TestEval(t *testing.T) {
 	}
 }
 
+func TestEvalJSON(t *testing.T) {
+	t.Parallel()
+
+	temporary := t.TempDir()
+	toolsPath := filepath.Join(temporary, "tools.json")
+	casesPath := filepath.Join(temporary, "cases.jsonl")
+	writeTestFile(t, toolsPath, `[
+		{"name":"get_weather","parameters":{"type":"object"}},
+		{"name":"set_timer","parameters":{"type":"object"}}
+	]`)
+	writeTestFile(t, casesPath, strings.Join([]string{
+		`{"input":"weather in Paris","want":[{"name":"get_weather","arguments":{"city":"Paris"}}]}`,
+		`{"input":"timer for ten minutes","want":["set_timer"]}`,
+		`{"input":"capital of France","want":[]}`,
+	}, "\n"))
+
+	confidence := 0.75
+	fake := &fakeAgent{responses: []needle.Response{
+		{
+			Type:       needle.ResponseCall,
+			Success:    true,
+			Confidence: &confidence,
+			FunctionCalls: []needle.FunctionCall{{
+				Name:      "get_weather",
+				Arguments: json.RawMessage(`{"city":"Paris"}`),
+			}},
+		},
+		{
+			Type:       needle.ResponseCall,
+			Success:    true,
+			Confidence: &confidence,
+			FunctionCalls: []needle.FunctionCall{{
+				Name:      "set_timer",
+				Arguments: json.RawMessage(`{"minutes":10}`),
+			}},
+		},
+		{Type: needle.ResponseRespond, Success: true, Confidence: &confidence},
+	}}
+	app, stdout, stderr := testApplication("")
+	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+		return fake, nil
+	}
+	if code := app.run(context.Background(), []string{
+		"eval",
+		"--tools", toolsPath,
+		"--cases", casesPath,
+		"--format", "json",
+		"--min-score", "1",
+	}); code != 0 {
+		t.Fatalf("JSON eval exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+
+	var report evaluationReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v; output = %q", err, stdout.String())
+	}
+	if report.SchemaVersion != evaluationReportSchemaVersion ||
+		len(report.Cases) != 3 || report.Cases[0].Input != "weather in Paris" {
+		t.Fatalf("JSON cases = %#v", report.Cases)
+	}
+	weather := report.Cases[0]
+	if !weather.CallResponse || !weather.NameMatch || !weather.ExactMatch ||
+		len(weather.Want) != 1 || string(weather.Want[0].Arguments) != `{"city":"Paris"}` ||
+		len(weather.Response.FunctionCalls) != 1 || weather.Response.FunctionCalls[0].Name != "get_weather" {
+		t.Fatalf("weather report = %#v", weather)
+	}
+	if report.Cases[1].Want[0].Arguments != nil {
+		t.Fatalf("name-only expectation arguments = %s", report.Cases[1].Want[0].Arguments)
+	}
+	noCall := report.Cases[2]
+	if noCall.CallResponse || !noCall.NameMatch || !noCall.ExactMatch || len(noCall.Want) != 0 {
+		t.Fatalf("no-call report = %#v", noCall)
+	}
+	if report.Summary.Total != 3 || report.Summary.CallResponses != 2 ||
+		report.Summary.NameMatches != 3 || report.Summary.ExactMatches != 3 ||
+		report.Summary.Score != 1 || report.Summary.MinimumScore != 1 || !report.Summary.Passed ||
+		report.Summary.AverageConfidence == nil || *report.Summary.AverageConfidence != confidence {
+		t.Fatalf("JSON summary = %#v", report.Summary)
+	}
+}
+
 func TestEvalMinimumScore(t *testing.T) {
 	t.Parallel()
 
@@ -204,6 +285,24 @@ func TestEvalMinimumScore(t *testing.T) {
 	}); code != 0 {
 		t.Fatalf("non-gating eval exit code = %d, stderr = %q", code, stderr.String())
 	}
+
+	app, stdout, stderr = testApplication("")
+	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+		return &fakeAgent{responses: []needle.Response{response}}, nil
+	}
+	if code := app.run(context.Background(), []string{
+		"eval", "--tools", toolsPath, "--cases", casesPath, "--format", "json", "--min-score", "1",
+	}); code != 1 {
+		t.Fatalf("threshold JSON eval exit code = %d", code)
+	}
+	var report evaluationReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode threshold JSON report: %v; output = %q", err, stdout.String())
+	}
+	if report.Summary.Passed || report.Summary.Score != 0 || report.Summary.MinimumScore != 1 ||
+		!strings.Contains(stderr.String(), "below --min-score") {
+		t.Fatalf("threshold JSON summary = %#v stderr = %q", report.Summary, stderr.String())
+	}
 }
 
 func TestEvalUsageAndInvalidCases(t *testing.T) {
@@ -217,6 +316,11 @@ func TestEvalUsageAndInvalidCases(t *testing.T) {
 		"eval", "--tools", "tools.json", "--cases", "cases.jsonl", "--min-score", "2",
 	}); code != 2 {
 		t.Fatalf("invalid score exit code = %d", code)
+	}
+	if code := app.run(context.Background(), []string{
+		"eval", "--tools", "tools.json", "--cases", "cases.jsonl", "--format", "yaml",
+	}); code != 2 {
+		t.Fatalf("invalid format exit code = %d", code)
 	}
 
 	temporary := t.TempDir()
