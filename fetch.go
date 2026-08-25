@@ -111,6 +111,9 @@ var artifacts = map[Platform]engineArtifact{
 
 var fetchMu sync.Mutex
 
+// ErrEngineNotFound indicates that a cached engine library is unavailable.
+var ErrEngineNotFound = errors.New("needle: engine library not found")
+
 // SupportedPlatforms returns the desktop engine builds known to this version.
 func SupportedPlatforms() []Platform {
 	return []Platform{
@@ -149,6 +152,43 @@ func CurrentPlatform() (Platform, error) {
 	default:
 		return "", fmt.Errorf("%w: %s/%s", ErrUnsupportedPlatform, runtime.GOOS, runtime.GOARCH)
 	}
+}
+
+// CachedEngine returns the expected cached library path without downloading
+// anything. It accepts libraries installed by needle-go or another client.
+func CachedEngine(options FetchOptions) (string, error) {
+	platform := options.Platform
+	if platform == "" {
+		var err error
+		platform, err = CurrentPlatform()
+		if err != nil {
+			return "", err
+		}
+	}
+	artifact, ok := artifacts[platform]
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedPlatform, platform)
+	}
+	cacheDir := options.CacheDir
+	if cacheDir == "" {
+		var err error
+		cacheDir, err = defaultCacheDir()
+		if err != nil {
+			return "", err
+		}
+	}
+	path := filepath.Join(cacheDir, artifact.libraryName)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("%w: %s", ErrEngineNotFound, path)
+		}
+		return "", fmt.Errorf("needle: inspect cached engine: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%w: %s is not a regular file", ErrEngineNotFound, path)
+	}
+	return path, nil
 }
 
 // FetchEngine downloads, verifies, and caches the shared library for one

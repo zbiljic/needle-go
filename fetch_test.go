@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,27 @@ func TestFetchEngineRejectsUnknownPlatform(t *testing.T) {
 	_, err := FetchEngine(context.Background(), FetchOptions{Platform: "plan9-amd64"})
 	if err == nil || !strings.Contains(err.Error(), ErrUnsupportedPlatform.Error()) {
 		t.Fatalf("FetchEngine() error = %v", err)
+	}
+}
+
+func TestCachedEngine(t *testing.T) {
+	t.Parallel()
+
+	cacheDir := t.TempDir()
+	options := FetchOptions{Platform: PlatformDarwinARM64, CacheDir: cacheDir}
+	if _, err := CachedEngine(options); !errors.Is(err, ErrEngineNotFound) {
+		t.Fatalf("CachedEngine() missing error = %v", err)
+	}
+	path := filepath.Join(cacheDir, artifacts[PlatformDarwinARM64].libraryName)
+	if err := os.WriteFile(path, []byte("library"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := CachedEngine(options)
+	if err != nil {
+		t.Fatalf("CachedEngine() error = %v", err)
+	}
+	if got != path {
+		t.Fatalf("CachedEngine() = %q, want %q", got, path)
 	}
 }
 
