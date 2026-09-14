@@ -1,11 +1,17 @@
 package needle
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+)
+
+const (
+	needle2WeightsTag = 0x05e12a83
+	needle3WeightsTag = 0x05e12a84
 )
 
 // ErrUnsupportedPlatform indicates that no PureGo shared-library backend is
@@ -72,6 +78,16 @@ func (r *processRuntime) bindLocked(a *agent) error {
 		}
 		if len(blob) == 0 {
 			return errors.New("needle: weights file is empty")
+		}
+		if len(blob) < 4 {
+			return errors.New("needle: weights header is truncated")
+		}
+		switch tag := binary.LittleEndian.Uint32(blob[:4]); tag {
+		case needle2WeightsTag:
+		case needle3WeightsTag:
+			return errors.New("needle: Needle 3 weights are unsupported; requires Needle 2")
+		default:
+			return fmt.Errorf("needle: unknown weights header 0x%08x", tag)
 		}
 		if code := r.api.load(blob, uint64(len(blob))); code != 0 {
 			return fmt.Errorf("needle: load weights failed with code %d", code)

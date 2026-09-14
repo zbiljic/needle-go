@@ -73,14 +73,18 @@ type Tool struct {
 
 // Config configures an Agent.
 type Config struct {
-	Tools         []Tool
-	System        string
+	Tools  []Tool
+	System string
+	// WeightsPath selects Needle 2 .cact weights. The header check does not
+	// validate the remaining bytes or engine revision compatibility; those are
+	// left to the native loader.
 	WeightsPath   string
 	ToolIndexPath string
 	BufferSize    int
 
-	// LibraryPath selects an existing Needle shared library. When empty, New
-	// checks NEEDLE_LIB_PATH and then fetches the engine for this platform.
+	// LibraryPath selects a trusted, Needle 2 ABI-compatible shared library.
+	// When empty, New checks NEEDLE_LIB_PATH and then fetches the engine for
+	// this platform. NEEDLE_LIB_PATH must also name a trusted, compatible library.
 	LibraryPath string
 	// CacheDir overrides the engine download directory.
 	CacheDir string

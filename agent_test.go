@@ -22,6 +22,7 @@ type fakeNative struct {
 	tools        []string
 	indexes      []*string
 	loaded       []byte
+	loads        int
 	resets       int
 }
 
@@ -52,6 +53,7 @@ func (f *fakeNative) api() *nativeAPI {
 		},
 		reset: func() { f.resets++ },
 		load: func(blob []byte, size uint64) int32 {
+			f.loads++
 			f.loaded = append([]byte(nil), blob[:size]...)
 			return f.loadCode
 		},
@@ -476,7 +478,8 @@ func TestRuntimeRetainsTunedWeights(t *testing.T) {
 	t.Parallel()
 
 	weightsPath := t.TempDir() + "/tuned.cact"
-	if err := os.WriteFile(weightsPath, []byte("weights"), 0o600); err != nil {
+	weights := append([]byte{0x83, 0x2a, 0xe1, 0x05}, []byte("weights")...)
+	if err := os.WriteFile(weightsPath, weights, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeNative{}
@@ -492,8 +495,11 @@ func TestRuntimeRetainsTunedWeights(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bind tuned agent: %v", err)
 	}
-	if string(fake.loaded) != "weights" || string(runtime.activeBlob) != "weights" {
+	if !reflect.DeepEqual(fake.loaded, weights) || !reflect.DeepEqual(runtime.activeBlob, weights) {
 		t.Fatalf("loaded weights = %q, retained = %q", fake.loaded, runtime.activeBlob)
+	}
+	if fake.loads != 1 {
+		t.Fatalf("load calls = %d, want 1", fake.loads)
 	}
 
 	base, err := prepareAgent(Config{})
@@ -507,6 +513,167 @@ func TestRuntimeRetainsTunedWeights(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot be unloaded") {
 		t.Fatalf("bind base agent error = %v", err)
 	}
+}
+
+func TestRejectWeightsGeneration(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		blob      []byte
+		missing   bool
+		loadCode  int32
+		wantError string
+		wantLoads int
+	}{
+		{
+			name:      "missing",
+			missing:   true,
+			wantError: "needle: read weights:",
+		},
+		{
+			name:      "empty",
+			blob:      []byte{},
+			wantError: "needle: weights file is empty",
+		},
+		{
+			name:      "one header byte",
+			blob:      []byte{0x83},
+			wantError: "needle: weights header is truncated",
+		},
+		{
+			name:      "two header bytes",
+			blob:      []byte{0x83, 0x2a},
+			wantError: "needle: weights header is truncated",
+		},
+		{
+			name:      "three header bytes",
+			blob:      []byte{0x83, 0x2a, 0xe1},
+			wantError: "needle: weights header is truncated",
+		},
+		{
+			name:      "Needle 3",
+			blob:      []byte{0x84, 0x2a, 0xe1, 0x05, 1},
+			wantError: "needle: Needle 3 weights are unsupported; requires Needle 2",
+		},
+		{
+			name:      "unknown",
+			blob:      []byte{0, 0, 0, 1},
+			wantError: "needle: unknown weights header 0x01000000",
+		},
+		{
+			name:      "wrong byte order",
+			blob:      []byte{0x05, 0xe1, 0x2a, 0x83},
+			wantError: "needle: unknown weights header 0x832ae105",
+		},
+		{
+			name:      "load failure",
+			blob:      []byte{0x83, 0x2a, 0xe1, 0x05, 1},
+			loadCode:  7,
+			wantError: "needle: load weights failed with code 7",
+			wantLoads: 1,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			weightsPath := dir + "/tuned.cact"
+			if !test.missing {
+				if err := os.WriteFile(weightsPath, test.blob, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			prepared, err := prepareAgent(Config{WeightsPath: weightsPath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := &fakeNative{loadCode: test.loadCode}
+			runtime := &processRuntime{api: fake.api(), libraryPath: "test"}
+			prepared.runtime = runtime
+			runtime.mu.Lock()
+			err = runtime.bindLocked(prepared)
+			runtime.mu.Unlock()
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("bindLocked() error = %v, want %q", err, test.wantError)
+			}
+			if test.missing && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("bindLocked() error = %v, want wrapped os.ErrNotExist", err)
+			}
+			if fake.loads != test.wantLoads || len(fake.systems) != 0 {
+				t.Fatalf(
+					"load calls = %d, init calls = %d, want %d, 0",
+					fake.loads,
+					len(fake.systems),
+					test.wantLoads,
+				)
+			}
+			if runtime.active != nil || runtime.activeWeights != "" || runtime.activeBlob != nil {
+				t.Fatalf(
+					"active state changed: agent=%p weights=%q blob=%q",
+					runtime.active,
+					runtime.activeWeights,
+					runtime.activeBlob,
+				)
+			}
+		})
+	}
+
+	t.Run("active tuned agent unchanged", func(t *testing.T) {
+		dir := t.TempDir()
+		validPath := dir + "/valid.cact"
+		invalidPath := dir + "/invalid.cact"
+		validBlob := []byte{0x83, 0x2a, 0xe1, 0x05, 1}
+		if err := os.WriteFile(validPath, validBlob, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		invalidBlob := []byte{0x84, 0x2a, 0xe1, 0x05}
+		if err := os.WriteFile(invalidPath, invalidBlob, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fake := &fakeNative{}
+		runtime := &processRuntime{api: fake.api(), libraryPath: "test"}
+		active, err := prepareAgent(Config{WeightsPath: validPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		active.runtime = runtime
+		runtime.mu.Lock()
+		err = runtime.bindLocked(active)
+		runtime.mu.Unlock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		originalBlob := append([]byte(nil), runtime.activeBlob...)
+
+		invalid, err := prepareAgent(Config{WeightsPath: invalidPath})
+		if err != nil {
+			t.Fatal(err)
+		}
+		invalid.runtime = runtime
+		runtime.mu.Lock()
+		err = runtime.bindLocked(invalid)
+		runtime.mu.Unlock()
+		if err == nil || !strings.Contains(err.Error(), "Needle 3 weights are unsupported") {
+			t.Fatalf("bindLocked() error = %v", err)
+		}
+		if runtime.active != active ||
+			runtime.activeWeights != validPath ||
+			!reflect.DeepEqual(runtime.activeBlob, originalBlob) {
+			t.Fatalf(
+				"active state changed: agent=%p weights=%q blob=%q",
+				runtime.active,
+				runtime.activeWeights,
+				runtime.activeBlob,
+			)
+		}
+		if fake.loads != 1 || len(fake.systems) != 1 {
+			t.Fatalf(
+				"load calls = %d, init calls = %d, want 1, 1",
+				fake.loads,
+				len(fake.systems),
+			)
+		}
+	})
 }
 
 func readCString(pointer *byte) string {
