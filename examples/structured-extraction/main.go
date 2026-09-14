@@ -28,10 +28,13 @@ func main() {
 
 	response, err := agent.Complete(
 		ctx,
-		"Invoice from Acme Corp, $1,200.00, due 2026-09-01.",
+		"Invoice from Acme Corp, total 1200, due 2026-09-01.",
 		needle.DefaultMaxNewTokens,
 	)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err := needle.ValidateResponse(response); err != nil {
 		log.Fatal(err)
 	}
 	extracted, err := needle.Extract[invoice](response)

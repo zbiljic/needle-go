@@ -24,9 +24,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	response, err := agent.Complete(ctx, "Find Ada Lovelace in my contacts.", needle.DefaultMaxNewTokens)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err := needle.ValidateResponse(response); err != nil {
 		log.Fatal(err)
 	}
 	if response.Type != needle.ResponseCall || len(response.FunctionCalls) == 0 {
@@ -49,6 +51,9 @@ func main() {
 	}
 	response, err = agent.Complete(ctx, string(toolResults), needle.DefaultMaxNewTokens)
 	if err != nil {
+		log.Fatal(err)
+	}
+	if err := needle.ValidateResponse(response); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("final response: %s\n", response.Type)

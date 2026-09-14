@@ -31,6 +31,12 @@ type FunctionCall struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// Validation contains warnings produced by the Needle engine.
+type Validation struct {
+	Ungrounded []string `json:"ungrounded"`
+	Negation   bool     `json:"negation"`
+}
+
 // Response is the structured response envelope returned by Needle.
 type Response struct {
 	Type          ResponseType   `json:"type"`
@@ -44,6 +50,7 @@ type Response struct {
 	DecodeTPS     float64        `json:"decode_tps"`
 	PeakRAMMB     float64        `json:"peak_ram_mb"`
 	Results       []any          `json:"results,omitempty"`
+	Validation    *Validation    `json:"validation,omitempty"`
 }
 
 // ToolSchema describes a function that the model may call.
@@ -81,7 +88,11 @@ type Config struct {
 
 // Agent defines the Needle conversation lifecycle.
 type Agent interface {
+	// Complete performs raw inference without applying response validation.
 	Complete(ctx context.Context, text string, maxNewTokens int) (Response, error)
+	// Run uses ValidateResponse to reject an entire flagged turn before executing
+	// any tool calls, without retrying. It returns the raw flagged response and
+	// results from earlier completed rounds.
 	Run(ctx context.Context, query string, maxSteps, maxNewTokens int) (Response, error)
 	Reset(ctx context.Context) error
 }

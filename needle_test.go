@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,51 @@ func TestResponseJSON(t *testing.T) {
 	}
 	if response.Confidence == nil || *response.Confidence != 0.94 {
 		t.Fatalf("confidence = %#v", response.Confidence)
+	}
+}
+
+func TestResponseValidationJSON(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{`{"type":"respond"}`, `{"type":"respond","validation":null}`} {
+		var response Response
+		if err := json.Unmarshal([]byte(input), &response); err != nil || response.Validation != nil {
+			t.Fatalf("json.Unmarshal(%s) = %#v, %v", input, response.Validation, err)
+		}
+	}
+	emptyData, err := json.Marshal(Response{Type: ResponseRespond, Validation: &Validation{}})
+	if err != nil || !strings.Contains(string(emptyData), `"validation":{"ungrounded":null,"negation":false}`) {
+		t.Fatalf("empty validation JSON = %s, %v", emptyData, err)
+	}
+	absentData, err := json.Marshal(Response{Type: ResponseRespond})
+	if err != nil || strings.Contains(string(absentData), `"validation"`) {
+		t.Fatalf("absent validation JSON = %s, %v", absentData, err)
+	}
+
+	input := `{"type":"call","validation":{"ungrounded":["invoice.total","invoice.due_date"],"negation":true}}`
+	var response Response
+	if err := json.Unmarshal([]byte(input), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Validation == nil || !response.Validation.Negation || !reflect.DeepEqual(response.Validation.Ungrounded, []string{"invoice.total", "invoice.due_date"}) {
+		t.Fatalf("validation = %#v", response.Validation)
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Response
+	if err := json.Unmarshal(data, &roundTrip); err != nil || !reflect.DeepEqual(roundTrip.Validation, response.Validation) {
+		t.Fatalf("round trip validation = %#v, %v", roundTrip.Validation, err)
+	}
+
+	for _, input := range []string{
+		`{"type":"call","validation":{"ungrounded":true}}`,
+		`{"type":"call","validation":{"negation":"yes"}}`,
+	} {
+		if err := json.Unmarshal([]byte(input), &Response{}); err == nil {
+			t.Fatalf("json.Unmarshal(%s) error = nil", input)
+		}
 	}
 }
 

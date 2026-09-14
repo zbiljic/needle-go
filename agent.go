@@ -183,6 +183,8 @@ func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Re
 	return response, nil
 }
 
+// Run completes a query, rejects engine validation warnings, and executes
+// accepted tool calls until the model returns a final response.
 func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens int) (Response, error) {
 	if maxSteps == 0 {
 		maxSteps = DefaultMaxSteps
@@ -196,6 +198,10 @@ func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens in
 		return Response{}, err
 	}
 	executed := make([]any, 0)
+	if err := ValidateResponse(response); err != nil {
+		response.Results = executed
+		return response, fmt.Errorf("needle: run: %w", err)
+	}
 	for range maxSteps {
 		if response.Type != ResponseCall || len(response.FunctionCalls) == 0 {
 			break
@@ -214,6 +220,10 @@ func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens in
 		response, err = a.Complete(ctx, string(payload), maxNewTokens)
 		if err != nil {
 			return Response{}, err
+		}
+		if err := ValidateResponse(response); err != nil {
+			response.Results = executed
+			return response, fmt.Errorf("needle: run: %w", err)
 		}
 	}
 	response.Results = executed

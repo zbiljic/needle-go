@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -173,6 +174,27 @@ func TestComplete(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"weather"`) || !json.Valid(stdout.Bytes()) {
 		t.Fatalf("complete output = %q", stdout.String())
+	}
+}
+
+func TestCompleteValidationJSON(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeAgent{responses: []needle.Response{{
+		Type:       needle.ResponseCall,
+		Validation: &needle.Validation{Ungrounded: []string{"weather.city"}, Negation: true},
+	}}}
+	app, stdout, stderr := testApplication("")
+	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) { return fake, nil }
+	if code := app.run(context.Background(), []string{"complete", "--prompt", "weather"}); code != 0 {
+		t.Fatalf("complete exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var response needle.Response
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Validation == nil || !response.Validation.Negation || !reflect.DeepEqual(response.Validation.Ungrounded, []string{"weather.city"}) {
+		t.Fatalf("validation = %#v", response.Validation)
 	}
 }
 

@@ -6,7 +6,8 @@ import (
 )
 
 // Extract decodes a structured response containing exactly one function call
-// into a value of type T.
+// into a value of type T. It does not validate engine warnings; callers that
+// act on the value should call ValidateResponse first.
 func Extract[T any](response Response) (T, error) {
 	var value T
 	if response.Type != ResponseCall {

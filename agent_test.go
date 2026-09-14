@@ -277,6 +277,162 @@ func TestRunReportsToolErrors(t *testing.T) {
 	}
 }
 
+func TestRunValidation(t *testing.T) {
+	t.Parallel()
+
+	call := func(name, arguments string, validation string) []byte {
+		return []byte(`{"type":"call","function_calls":[{"name":"` + name +
+			`","arguments":` + arguments + `}]` + validation + `}`)
+	}
+	validCall := call("tool", `{}`, "")
+	tests := []struct {
+		name           string
+		responses      [][]byte
+		maxSteps       int
+		wantError      string
+		wantHandlers   int
+		wantCompletes  int
+		wantQueued     int
+		wantResults    int
+		wantValidation *Validation
+	}{
+		{
+			name:          "nil validation",
+			responses:     [][]byte{validCall, []byte(`{"type":"respond"}`)},
+			maxSteps:      1,
+			wantHandlers:  1,
+			wantCompletes: 2,
+			wantResults:   1,
+		},
+		{
+			name: "negation",
+			responses: [][]byte{
+				call("tool", `{}`, `,"confidence":0.933,"validation":{"negation":true}`),
+			},
+			wantError:      "negation",
+			wantCompletes:  1,
+			wantValidation: &Validation{Negation: true},
+		},
+		{
+			name: "ungrounded numeric formatted source",
+			responses: [][]byte{
+				call("tool", `{"total":1200}`, `,"validation":{"ungrounded":["invoice.total"]}`),
+			},
+			wantError:      "invoice.total",
+			wantCompletes:  1,
+			wantValidation: &Validation{Ungrounded: []string{"invoice.total"}},
+		},
+		{
+			name: "unrelated matching number in reasoning",
+			responses: [][]byte{
+				call("tool", `{"total":1200}`,
+					`,"reasoning":"order ID 1200","validation":{"ungrounded":["invoice.total"]}`),
+			},
+			wantError:      "invoice.total",
+			wantCompletes:  1,
+			wantValidation: &Validation{Ungrounded: []string{"invoice.total"}},
+		},
+		{
+			name: "unknown field on empty calls",
+			responses: [][]byte{
+				[]byte(`{"type":"call","function_calls":[],"validation":{"ungrounded":["unknown.path"]}}`),
+			},
+			wantError:      "unknown.path",
+			wantCompletes:  1,
+			wantValidation: &Validation{Ungrounded: []string{"unknown.path"}},
+		},
+		{
+			name: "warning on response envelope",
+			responses: [][]byte{
+				[]byte(`{"type":"respond","validation":{"negation":true}}`),
+			},
+			wantError:      "negation",
+			wantCompletes:  1,
+			wantValidation: &Validation{Negation: true},
+		},
+		{
+			name: "two calls whole turn rejected",
+			responses: [][]byte{
+				[]byte(`{"type":"call","function_calls":[{"name":"tool","arguments":{}},{"name":"tool","arguments":{}}],"validation":{"ungrounded":["tool.value"]}}`),
+			},
+			wantError:      "tool.value",
+			wantCompletes:  1,
+			wantValidation: &Validation{Ungrounded: []string{"tool.value"}},
+		},
+		{
+			name: "prior results retained and retry untouched",
+			responses: [][]byte{
+				validCall,
+				call("tool", `{}`, `,"validation":{"negation":true}`),
+				[]byte(`{"type":"respond"}`),
+			},
+			maxSteps:       2,
+			wantError:      "negation",
+			wantHandlers:   1,
+			wantCompletes:  2,
+			wantQueued:     1,
+			wantResults:    1,
+			wantValidation: &Validation{Negation: true},
+		},
+		{
+			name: "final completion after max steps rejected",
+			responses: [][]byte{
+				validCall,
+				[]byte(`{"type":"respond","validation":{"ungrounded":["final.answer"]}}`),
+			},
+			maxSteps:       1,
+			wantError:      "final.answer",
+			wantHandlers:   1,
+			wantCompletes:  2,
+			wantResults:    1,
+			wantValidation: &Validation{Ungrounded: []string{"final.answer"}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeNative{responses: append([][]byte(nil), test.responses...)}
+			handlers := 0
+			agent, _ := newTestAgent(t, fake, Config{
+				Tools: []Tool{{
+					Schema: ToolSchema{Name: "tool"},
+					Handler: func(context.Context, json.RawMessage) (any, error) {
+						handlers++
+						return "ok", nil
+					},
+				}},
+			})
+			response, err := agent.Run(
+				context.Background(), "$1,200.00 and order ID 1200", test.maxSteps, 1,
+			)
+			if (test.wantError == "") != (err == nil) || err != nil &&
+				(!strings.Contains(err.Error(), "needle: run:") ||
+					!strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("Run() error = %v, want %q", err, test.wantError)
+			}
+			if handlers != test.wantHandlers || len(fake.inputs) != test.wantCompletes ||
+				len(fake.responses) != test.wantQueued || len(response.Results) != test.wantResults {
+				t.Fatalf("handlers=%d completes=%d queued=%d results=%#v",
+					handlers, len(fake.inputs), len(fake.responses), response.Results)
+			}
+			if !reflect.DeepEqual(response.Validation, test.wantValidation) {
+				t.Fatalf("validation = %#v, want %#v", response.Validation, test.wantValidation)
+			}
+			var wantResponse Response
+			if err := json.Unmarshal(test.responses[test.wantCompletes-1], &wantResponse); err != nil {
+				t.Fatal(err)
+			}
+			wantResponse.Results = make([]any, test.wantResults)
+			for i := range wantResponse.Results {
+				wantResponse.Results[i] = "ok"
+			}
+			if !reflect.DeepEqual(response, wantResponse) {
+				t.Fatalf("Run() response = %#v, want %#v", response, wantResponse)
+			}
+		})
+	}
+}
+
 func TestReset(t *testing.T) {
 	t.Parallel()
 
