@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,16 +32,28 @@ func TestSupportedPlatforms(t *testing.T) {
 		PlatformWindowsAMD64,
 		PlatformWindowsARM64,
 	}
+	libraries := map[string]string{"darwin": "libneedle.dylib", "linux": "libneedle.so", "windows": "libneedle.dll"}
 	if got := SupportedPlatforms(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("SupportedPlatforms() = %#v, want %#v", got, want)
+	}
+	if len(artifacts) != len(want) {
+		t.Fatalf("len(artifacts) = %d, want %d", len(artifacts), len(want))
 	}
 	for _, platform := range want {
 		artifact, ok := artifacts[platform]
 		if !ok {
 			t.Fatalf("missing artifact for %s", platform)
 		}
-		if len(artifact.checksum) != sha256.Size*2 {
-			t.Fatalf("checksum for %s has length %d", platform, len(artifact.checksum))
+		checksum, err := hex.DecodeString(artifact.checksum)
+		if err != nil || len(checksum) != sha256.Size {
+			t.Fatalf("checksum for %s = %q, want %d-byte hex: %v", platform, artifact.checksum, sha256.Size, err)
+		}
+		if !strings.HasPrefix(artifact.filename, "cactus_needle-"+EngineVersion+"-") {
+			t.Errorf("filename for %s = %q", platform, artifact.filename)
+		}
+		libraryName := libraries[strings.SplitN(string(platform), "-", 2)[0]]
+		if artifact.libraryName != libraryName || artifact.archivePath != "needle/"+libraryName {
+			t.Errorf("library for %s = %q / %q", platform, artifact.archivePath, artifact.libraryName)
 		}
 	}
 }
@@ -183,9 +196,45 @@ func TestExtractLibraryRequiresExpectedMember(t *testing.T) {
 func TestArtifactURLPinsRevision(t *testing.T) {
 	t.Parallel()
 
-	url := artifactURL(artifacts[PlatformDarwinARM64])
-	if !strings.Contains(url, huggingFaceRevision) || strings.Contains(url, "/main/") {
-		t.Fatalf("artifactURL() = %q", url)
+	for _, platform := range SupportedPlatforms() {
+		artifact := artifacts[platform]
+		want := fmt.Sprintf(
+			"https://huggingface.co/%s/resolve/%s/python/%s?download=true",
+			huggingFaceRepo,
+			huggingFaceRevision,
+			artifact.filename,
+		)
+		if got := artifactURL(artifact); got != want || strings.Contains(got, "/main/") {
+			t.Errorf("artifactURL(%s) = %q, want %q", platform, got, want)
+		}
+	}
+}
+
+func TestPinnedEngineArtifacts(t *testing.T) {
+	if os.Getenv("NEEDLE_TEST_ARTIFACTS") != "1" {
+		t.Skip("set NEEDLE_TEST_ARTIFACTS=1 to verify pinned release artifacts")
+	}
+	for _, platform := range SupportedPlatforms() {
+		t.Run(string(platform), func(t *testing.T) {
+			artifact := artifacts[platform]
+			path, err := FetchEngine(context.Background(), FetchOptions{
+				Platform: platform,
+				CacheDir: t.TempDir(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if filepath.Base(path) != artifact.libraryName {
+				t.Fatalf("FetchEngine() path = %q, want library %q", path, artifact.libraryName)
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !info.Mode().IsRegular() || info.Size() == 0 {
+				t.Fatalf("FetchEngine() file mode = %v, size = %d", info.Mode(), info.Size())
+			}
+		})
 	}
 }
 
