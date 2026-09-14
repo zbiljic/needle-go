@@ -42,9 +42,6 @@ func (f *fakeNative) api() *nativeAPI {
 		complete: func(input *byte, tokens int32, output []byte, _ int32) int32 {
 			f.inputs = append(f.inputs, readCString(input))
 			f.tokens = append(f.tokens, tokens)
-			if f.completeCode < 0 {
-				return f.completeCode
-			}
 			if len(f.responses) > 0 {
 				copy(output, f.responses[0])
 				f.responses = f.responses[1:]
@@ -194,6 +191,86 @@ func TestCompleteErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCompleteNativeErrorDetail(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		code      int32
+		response  []byte
+		config    Config
+		wantError string
+	}{
+		{
+			name:      "ordinary diagnostic",
+			code:      -3,
+			response:  []byte("  native failure  "),
+			wantError: "needle: complete failed with code -3: native failure",
+		},
+		{
+			name:      "detail stops at NUL",
+			code:      -4,
+			response:  []byte("native failure\x00ignored"),
+			wantError: "needle: complete failed with code -4: native failure",
+		},
+		{
+			name:      "fully occupied buffer",
+			code:      -5,
+			response:  []byte("bounded"),
+			config:    Config{BufferSize: len("bounded")},
+			wantError: "needle: complete failed with code -5: bounded",
+		},
+		{
+			name:      "empty detail",
+			code:      -6,
+			response:  []byte("\x00ignored"),
+			wantError: "needle: complete failed with code -6",
+		},
+		{
+			name:      "whitespace detail",
+			code:      -7,
+			response:  []byte(" \t\n\x00ignored"),
+			wantError: "needle: complete failed with code -7",
+		},
+		{
+			name:      "invalid UTF-8",
+			code:      -8,
+			response:  []byte("bad\xfftext"),
+			wantError: "needle: complete failed with code -8: bad�text",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeNative{completeCode: test.code, responses: [][]byte{test.response}}
+			agent, _ := newTestAgent(t, fake, test.config)
+			response, err := agent.Complete(context.Background(), "test", 1)
+			if err == nil || err.Error() != test.wantError {
+				t.Fatalf("Complete() error = %v, want %q", err, test.wantError)
+			}
+			if !reflect.DeepEqual(response, Response{}) {
+				t.Fatalf("Complete() response = %#v, want empty response", response)
+			}
+		})
+	}
+
+	t.Run("clears stale response", func(t *testing.T) {
+		fake := &fakeNative{responses: [][]byte{[]byte(`{"type":"respond"}`)}}
+		agent, _ := newTestAgent(t, fake, Config{})
+		response, err := agent.Complete(context.Background(), "first", 1)
+		if err != nil || response.Type != ResponseRespond {
+			t.Fatalf("first Complete() = %#v, %v", response, err)
+		}
+		fake.completeCode = -9
+		response, err = agent.Complete(context.Background(), "second", 1)
+		if err == nil || err.Error() != "needle: complete failed with code -9" {
+			t.Fatalf("second Complete() error = %v", err)
+		}
+		if !reflect.DeepEqual(response, Response{}) {
+			t.Fatalf("second Complete() response = %#v, want empty response", response)
+		}
+	})
 }
 
 func TestRunExecutesToolsUntilResponse(t *testing.T) {
