@@ -102,12 +102,17 @@ func TestFetch(t *testing.T) {
 		return "/tmp/libneedle.so", nil
 	}
 	code := app.run(context.Background(), []string{
-		"fetch", "--platform", "linux-arm64", "--cache", "/tmp/engines",
+		"fetch",
+		"--generation", "2",
+		"--platform", "linux-arm64",
+		"--cache", "/tmp/engines",
 	})
 	if code != 0 {
 		t.Fatalf("fetch exit code = %d", code)
 	}
-	if gotOptions.Platform != needle.PlatformLinuxARM64 || gotOptions.CacheDir != "/tmp/engines" {
+	if gotOptions.Generation != 2 ||
+		gotOptions.Platform != needle.PlatformLinuxARM64 ||
+		gotOptions.CacheDir != "/tmp/engines" {
 		t.Fatalf("fetch options = %#v", gotOptions)
 	}
 	if stdout.String() != "/tmp/libneedle.so\n" {
@@ -157,7 +162,11 @@ func TestComplete(t *testing.T) {
 		return fake, nil
 	}
 	code := app.run(context.Background(), []string{
-		"complete", "--tools", toolsPath, "--system", "device: phone", "--max-tokens", "64",
+		"complete",
+		"--generation", "2",
+		"--tools", toolsPath,
+		"--system", "device: phone",
+		"--max-tokens", "64",
 		"--prompt", "weather in Lagos",
 	})
 	if code != 0 {
@@ -166,7 +175,7 @@ func TestComplete(t *testing.T) {
 	if len(gotConfig.Tools) != 1 || gotConfig.Tools[0].Schema.Name != "weather" {
 		t.Fatalf("agent tools = %#v", gotConfig.Tools)
 	}
-	if gotConfig.System != "device: phone" {
+	if gotConfig.Generation != 2 || gotConfig.System != "device: phone" {
 		t.Fatalf("agent system = %q", gotConfig.System)
 	}
 	if len(fake.inputs) != 1 || fake.inputs[0] != "weather in Lagos" || fake.tokens[0] != 64 {
@@ -253,13 +262,21 @@ func TestDoctor(t *testing.T) {
 		PeakRAMMB:  22,
 	}}}
 	app, stdout, stderr := testApplication("")
+	cacheDir := t.TempDir()
 	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
-		if config.LibraryPath != libraryPath {
-			t.Fatalf("doctor library = %q", config.LibraryPath)
+		if config.LibraryPath != libraryPath ||
+			config.CacheDir != cacheDir ||
+			config.Generation != 3 {
+			t.Fatalf("doctor config = %+v", config)
 		}
 		return fake, nil
 	}
-	if code := app.run(context.Background(), []string{"doctor", "--library", libraryPath, "--smoke"}); code != 0 {
+	if code := app.run(context.Background(), []string{
+		"doctor",
+		"--library", libraryPath,
+		"--cache", cacheDir,
+		"--smoke",
+	}); code != 0 {
 		t.Fatalf("doctor exit code = %d, stderr = %q", code, stderr.String())
 	}
 	if fake.resets != 1 || len(fake.inputs) != 1 {
@@ -345,6 +362,7 @@ func TestConformance(t *testing.T) {
 
 	code := app.run(context.Background(), []string{
 		"test",
+		"--generation", "2",
 		"--library", "/tmp/libneedle",
 		"--cache", "/tmp/needle-cache",
 		"--buffer-size", "4096",
@@ -360,7 +378,7 @@ func TestConformance(t *testing.T) {
 		t.Fatalf("agent configs = %d, want 6", len(configs))
 	}
 	for _, config := range configs {
-		if config.LibraryPath != "/tmp/libneedle" ||
+		if config.Generation != 2 || config.LibraryPath != "/tmp/libneedle" ||
 			config.CacheDir != "/tmp/needle-cache" ||
 			config.BufferSize != 4096 {
 			t.Fatalf("agent config = %#v", config)
@@ -400,6 +418,43 @@ func TestVersion(t *testing.T) {
 		!strings.Contains(stdout.String(), "engine "+needle.EngineVersion) ||
 		!strings.Contains(stdout.String(), string(needle.PlatformDarwinARM64)) {
 		t.Fatalf("version output = %q", stdout.String())
+	}
+}
+
+func TestDoctorWeightsSelectGeneration(t *testing.T) {
+	t.Setenv("NEEDLE_LIB_PATH", "")
+	t.Setenv("NEEDLE2_LIB_PATH", "")
+	t.Setenv("NEEDLE3_LIB_PATH", "")
+	cache := t.TempDir()
+	weights := filepath.Join(cache, "custom.cact")
+	if err := os.WriteFile(weights, []byte{0x83, 0x2a, 0xe1, 0x05}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	app, stdout, stderr := testApplication("")
+	app.deps.cachedEngine = func(options needle.FetchOptions) (string, error) {
+		if options.Generation != 2 || options.CacheDir != cache {
+			t.Fatalf("cache options=%+v", options)
+		}
+		return "/cache/libneedle", nil
+	}
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+		if config.Generation != 2 ||
+			config.CacheDir != cache ||
+			config.WeightsPath != weights {
+			t.Fatalf("config=%+v", config)
+		}
+		return &fakeAgent{}, nil
+	}
+	if code := app.run(context.Background(), []string{
+		"doctor",
+		"--generation", "3",
+		"--weights", weights,
+		"--cache", cache,
+	}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "2.0.4") {
+		t.Fatalf("version output=%s", stdout.String())
 	}
 }
 

@@ -36,6 +36,7 @@ type conformanceInvoice struct {
 
 func (a *application) runTest(ctx context.Context, args []string) error {
 	flags := a.flagSet("Run behavioral conformance checks against the native model.", "test [options]")
+	generation := flags.Int("generation", needle.DefaultGeneration, "model generation (2 or 3)")
 	libraryPath := flags.String("library", "", "path to libneedle shared library")
 	cacheDir := flags.String("cache", "", "engine cache directory")
 	bufferSize := flags.Int("buffer-size", 0, "native response buffer size")
@@ -45,10 +46,14 @@ func (a *application) runTest(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return usageError{errors.New("test does not accept positional arguments")}
 	}
+	if _, err := needle.EngineVersionFor(*generation); err != nil {
+		return usageError{err}
+	}
 
 	suite := conformanceSuite{
 		newAgent: a.deps.newAgent,
 		config: needle.Config{
+			Generation:  *generation,
 			LibraryPath: *libraryPath,
 			CacheDir:    *cacheDir,
 			BufferSize:  *bufferSize,

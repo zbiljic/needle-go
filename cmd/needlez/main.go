@@ -106,7 +106,7 @@ func (a *application) printUsage() {
 	fmt.Fprint(a.stderr, `Usage: needlez <command> [options]
 
 Commands:
-  fetch       Download and verify a native Needle engine
+  fetch       Download and verify an engine and its required base weights
   complete    Perform one raw model completion
   eval        Evaluate a tool set against JSONL prompt cases
   repl        Exercise a persistent model session interactively
@@ -140,7 +140,11 @@ func parseFlags(flags *flag.FlagSet, args []string) error {
 }
 
 func (a *application) runFetch(ctx context.Context, args []string) error {
-	flags := a.flagSet("Download the engine for this or another desktop platform.", "fetch [options]")
+	flags := a.flagSet(
+		"Download the engine and required base weights for a desktop platform.",
+		"fetch [options]",
+	)
+	generation := flags.Int("generation", needle.DefaultGeneration, "model generation (2 or 3)")
 	platform := flags.String("platform", "", "target platform; empty selects the current platform")
 	cacheDir := flags.String("cache", "", "engine cache directory")
 	list := flags.Bool("list", false, "list supported platforms without downloading")
@@ -150,6 +154,9 @@ func (a *application) runFetch(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return usageError{errors.New("fetch does not accept positional arguments")}
 	}
+	if _, err := needle.EngineVersionFor(*generation); err != nil {
+		return usageError{err}
+	}
 	if *list {
 		for _, supported := range needle.SupportedPlatforms() {
 			fmt.Fprintln(a.stdout, supported)
@@ -157,8 +164,9 @@ func (a *application) runFetch(ctx context.Context, args []string) error {
 		return nil
 	}
 	path, err := a.deps.fetchEngine(ctx, needle.FetchOptions{
-		Platform: needle.Platform(*platform),
-		CacheDir: *cacheDir,
+		Generation: *generation,
+		Platform:   needle.Platform(*platform),
+		CacheDir:   *cacheDir,
 	})
 	if err != nil {
 		return fmt.Errorf("fetch engine: %w", err)
@@ -168,6 +176,7 @@ func (a *application) runFetch(ctx context.Context, args []string) error {
 }
 
 type agentOptions struct {
+	generation  int
 	libraryPath string
 	cacheDir    string
 	weightsPath string
@@ -180,6 +189,10 @@ type agentOptions struct {
 }
 
 func addAgentFlags(flags *flag.FlagSet, options *agentOptions) {
+	flags.IntVar(
+		&options.generation, "generation", needle.DefaultGeneration,
+		"model generation (2 or 3); custom weights take precedence",
+	)
 	flags.StringVar(&options.libraryPath, "library", "", "path to libneedle shared library")
 	flags.StringVar(&options.cacheDir, "cache", "", "engine cache directory")
 	flags.StringVar(&options.weightsPath, "weights", "", "path to tuned .cact weights")
@@ -219,6 +232,7 @@ func (a *application) agentConfig(options agentOptions) (needle.Config, error) {
 		}
 	}
 	return needle.Config{
+		Generation:    options.generation,
 		Tools:         tools,
 		System:        system,
 		WeightsPath:   options.weightsPath,
@@ -335,6 +349,10 @@ func (a *application) runREPL(ctx context.Context, args []string) error {
 
 func (a *application) runDoctor(ctx context.Context, args []string) error {
 	flags := a.flagSet("Check local engine discovery, loading, and initialization.", "doctor [options]")
+	generation := flags.Int(
+		"generation", needle.DefaultGeneration,
+		"model generation (2 or 3); custom weights take precedence",
+	)
 	libraryPath := flags.String("library", "", "path to libneedle shared library")
 	cacheDir := flags.String("cache", "", "engine cache directory")
 	weightsPath := flags.String("weights", "", "path to tuned .cact weights")
@@ -347,22 +365,35 @@ func (a *application) runDoctor(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return usageError{errors.New("doctor does not accept positional arguments")}
 	}
+	if *weightsPath != "" {
+		var err error
+		*generation, err = needle.WeightsGeneration(*weightsPath)
+		if err != nil {
+			return err
+		}
+	}
+	engineVersion, err := needle.EngineVersionFor(*generation)
+	if err != nil {
+		return usageError{err}
+	}
 	platform, err := a.deps.currentPlatform()
 	if err != nil {
 		fmt.Fprintf(a.stdout, "✗ Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return err
 	}
 	fmt.Fprintf(a.stdout, "✓ Platform: %s\n", platform)
-	fmt.Fprintf(a.stdout, "✓ Engine version: %s\n", needle.EngineVersion)
+	fmt.Fprintf(a.stdout, "✓ Engine version: %s\n", engineVersion)
 
-	path, source, err := a.findLibrary(*libraryPath, *cacheDir)
+	path, source, err := a.findLibrary(*libraryPath, *cacheDir, *generation)
 	if err != nil {
 		fmt.Fprintln(a.stdout, "✗ Library: not found")
-		return fmt.Errorf("%w; run `needlez fetch`", err)
+		return fmt.Errorf("%w; run `needlez fetch --generation %d`", err, *generation)
 	}
 	fmt.Fprintf(a.stdout, "✓ Library: %s (%s)\n", path, source)
 
 	agent, err := a.deps.newAgent(ctx, needle.Config{
+		Generation:  *generation,
+		CacheDir:    *cacheDir,
 		LibraryPath: path,
 		WeightsPath: *weightsPath,
 		BufferSize:  *bufferSize,
@@ -397,13 +428,26 @@ func (a *application) runDoctor(ctx context.Context, args []string) error {
 	return nil
 }
 
-func (a *application) findLibrary(configured, cacheDir string) (string, string, error) {
+func (a *application) findLibrary(
+	configured, cacheDir string,
+	generation int,
+) (string, string, error) {
+	if generation == 0 {
+		generation = needle.DefaultGeneration
+	}
 	path, source := configured, "--library"
 	if path == "" {
+		source = fmt.Sprintf("NEEDLE%d_LIB_PATH", generation)
+		path = os.Getenv(source)
+	}
+	if path == "" && generation == 2 {
 		path, source = os.Getenv(needle.EnvLibraryPath), needle.EnvLibraryPath
 	}
 	if path == "" {
-		cached, err := a.deps.cachedEngine(needle.FetchOptions{CacheDir: cacheDir})
+		cached, err := a.deps.cachedEngine(needle.FetchOptions{
+			Generation: generation,
+			CacheDir:   cacheDir,
+		})
 		if err != nil {
 			return "", "", err
 		}
@@ -425,18 +469,23 @@ func (a *application) findLibrary(configured, cacheDir string) (string, string, 
 
 func (a *application) runVersion(args []string) error {
 	flags := a.flagSet("Print version information.", "version")
+	generation := flags.Int("generation", needle.DefaultGeneration, "model generation (2 or 3)")
 	if err := parseFlags(flags, args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return usageError{errors.New("version does not accept positional arguments")}
 	}
+	engineVersion, err := needle.EngineVersionFor(*generation)
+	if err != nil {
+		return usageError{err}
+	}
 	platform, err := a.deps.currentPlatform()
 	if err != nil {
 		platform = needle.Platform(runtime.GOOS + "-" + runtime.GOARCH + " (unsupported)")
 	}
 	fmt.Fprintf(a.stdout, "needlez %s\n", effectiveVersion())
-	fmt.Fprintf(a.stdout, "engine %s\n", needle.EngineVersion)
+	fmt.Fprintf(a.stdout, "engine %s\n", engineVersion)
 	fmt.Fprintf(a.stdout, "platform %s\n", platform)
 	return nil
 }
