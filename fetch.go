@@ -19,13 +19,13 @@ import (
 )
 
 const (
-	// EngineVersion is the Needle native engine version used by this package.
-	EngineVersion = "2.0.4"
-	// EnvLibraryPath overrides native engine discovery.
+	// EngineVersion is the default (Needle 3) native engine version.
+	EngineVersion = "3.0.1"
+	// EnvLibraryPath overrides Needle 2 engine discovery for legacy clients.
 	EnvLibraryPath = "NEEDLE_LIB_PATH"
 
-	huggingFaceRepo     = "Cactus-Compute/needle2"
-	huggingFaceRevision = "32e9e3a93b205f786929697446ae669cf0a84579"
+	huggingFaceRepo     = "Cactus-Compute/needle3"
+	huggingFaceRevision = "9da75122d4ca11aa4a667281c9c8ba38a7eed679"
 	maxArtifactSize     = 64 << 20
 )
 
@@ -46,9 +46,11 @@ const (
 // FetchOptions configures an engine download. An empty Platform selects the
 // current process platform. CacheDir is the exact destination directory.
 type FetchOptions struct {
-	Platform Platform
-	CacheDir string
-	Client   *http.Client
+	// Generation selects 2 or 3; zero defaults to 3.
+	Generation int
+	Platform   Platform
+	CacheDir   string
+	Client     *http.Client
 }
 
 type engineArtifact struct {
@@ -58,7 +60,7 @@ type engineArtifact struct {
 	libraryName string
 }
 
-var artifacts = map[Platform]engineArtifact{
+var artifactsV2 = map[Platform]engineArtifact{
 	PlatformDarwinARM64: {
 		filename:    "cactus_needle-2.0.4-py3-none-macosx_11_0_arm64.whl",
 		checksum:    "abae4cca0a4d84ec73da4bde18803b9be812a9209e48fb7fa372002ebaa60265",
@@ -109,6 +111,98 @@ var artifacts = map[Platform]engineArtifact{
 	},
 }
 
+var artifacts = map[Platform]engineArtifact{
+	PlatformDarwinARM64: {
+		filename:    "cactus_needle-3.0.1-py3-none-macosx_11_0_arm64.whl",
+		checksum:    "9d3ba55986ad664ddffac4aec680c0657dc82ad04f868898e8085f13755c025f",
+		archivePath: "needle/libneedle3.dylib",
+		libraryName: "libneedle3.dylib",
+	},
+	PlatformDarwinAMD64: {
+		filename:    "cactus_needle-3.0.1-py3-none-macosx_11_0_x86_64.whl",
+		checksum:    "22d2693ea23439c2934556c2da8d0aaf708d55546a8b9b68a0647333b42501eb",
+		archivePath: "needle/libneedle3.dylib",
+		libraryName: "libneedle3.dylib",
+	},
+	PlatformLinuxARM64: {
+		filename:    "cactus_needle-3.0.1-py3-none-manylinux2014_aarch64.whl",
+		checksum:    "a2196ca18bd4ec6ebcb1e9d0341f4c4764e5f61ebe313f4d00ff6f2426fc501d",
+		archivePath: "needle/libneedle3.so",
+		libraryName: "libneedle3.so",
+	},
+	PlatformLinuxAMD64: {
+		filename:    "cactus_needle-3.0.1-py3-none-manylinux2014_x86_64.whl",
+		checksum:    "01370dc7ab28fb4f7cf98dc240cf3dc8a11a29916a404f6d4ed621f496d667ee",
+		archivePath: "needle/libneedle3.so",
+		libraryName: "libneedle3.so",
+	},
+	PlatformLinuxARM64Musl: {
+		filename:    "cactus_needle-3.0.1-py3-none-musllinux_1_2_aarch64.whl",
+		checksum:    "14aef80edefc2709dbbe2f0cd1adcdc99b2213d2f2810650d38f13c9b2daad1e",
+		archivePath: "needle/libneedle3.so",
+		libraryName: "libneedle3.so",
+	},
+	PlatformLinuxAMD64Musl: {
+		filename:    "cactus_needle-3.0.1-py3-none-musllinux_1_2_x86_64.whl",
+		checksum:    "89995bb2b2559ba7859e4775bc60de2f608bef91b29d8ea91e22ac6eec16c39f",
+		archivePath: "needle/libneedle3.so",
+		libraryName: "libneedle3.so",
+	},
+	PlatformWindowsAMD64: {
+		filename:    "cactus_needle-3.0.1-py3-none-win_amd64.whl",
+		checksum:    "b8c56b881221569a2bd7e5e7e9b202b9e9183e2a5dded3c68b543152a1de975f",
+		archivePath: "needle/libneedle3.dll",
+		libraryName: "libneedle3.dll",
+	},
+	PlatformWindowsARM64: {
+		filename:    "cactus_needle-3.0.1-py3-none-win_arm64.whl",
+		checksum:    "6705699b30daccd7e12e3692766eae7c5841379e5a9878ba2816c91fa86f50c8",
+		archivePath: "needle/libneedle3.dll",
+		libraryName: "libneedle3.dll",
+	},
+}
+
+var baseWeights = engineArtifact{
+	filename:    "needle3.cact",
+	libraryName: "needle3.cact",
+	checksum:    "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38",
+}
+
+type engineRelease struct {
+	generation              int
+	version, repo, revision string
+	artifacts               map[Platform]engineArtifact
+}
+
+func releaseFor(generation int) (engineRelease, error) {
+	switch generation {
+	case 2:
+		return engineRelease{
+			generation: 2,
+			version:    "2.0.4",
+			repo:       "Cactus-Compute/needle2",
+			revision:   "32e9e3a93b205f786929697446ae669cf0a84579",
+			artifacts:  artifactsV2,
+		}, nil
+	case 0, 3:
+		return engineRelease{
+			generation: 3,
+			version:    EngineVersion,
+			repo:       huggingFaceRepo,
+			revision:   huggingFaceRevision,
+			artifacts:  artifacts,
+		}, nil
+	default:
+		return engineRelease{}, fmt.Errorf("needle: unsupported generation %d; want 2 or 3", generation)
+	}
+}
+
+// EngineVersionFor returns the pinned engine version for a generation (zero means 3).
+func EngineVersionFor(generation int) (string, error) {
+	release, err := releaseFor(generation)
+	return release.version, err
+}
+
 var fetchMu sync.Mutex
 
 // ErrEngineNotFound indicates that a cached engine library is unavailable.
@@ -157,6 +251,10 @@ func CurrentPlatform() (Platform, error) {
 // CachedEngine returns the expected cached library path without downloading
 // anything. It accepts libraries installed by needle-go or another client.
 func CachedEngine(options FetchOptions) (string, error) {
+	release, err := releaseFor(options.Generation)
+	if err != nil {
+		return "", err
+	}
 	platform := options.Platform
 	if platform == "" {
 		var err error
@@ -165,14 +263,14 @@ func CachedEngine(options FetchOptions) (string, error) {
 			return "", err
 		}
 	}
-	artifact, ok := artifacts[platform]
+	artifact, ok := release.artifacts[platform]
 	if !ok {
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedPlatform, platform)
 	}
 	cacheDir := options.CacheDir
 	if cacheDir == "" {
 		var err error
-		cacheDir, err = defaultCacheDir()
+		cacheDir, err = defaultCacheDir(release)
 		if err != nil {
 			return "", err
 		}
@@ -191,9 +289,26 @@ func CachedEngine(options FetchOptions) (string, error) {
 	return path, nil
 }
 
-// FetchEngine downloads, verifies, and caches the shared library for one
-// desktop platform. It returns the path to the extracted library.
+// FetchEngine downloads, verifies, and caches the shared library and required
+// base weights for one desktop platform. It returns the library path.
 func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
+	path, err := fetchEngineLibrary(ctx, options)
+	if err != nil {
+		return "", err
+	}
+	if options.Generation == 0 || options.Generation == 3 {
+		if _, err := fetchBaseWeights(ctx, options); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+func fetchEngineLibrary(ctx context.Context, options FetchOptions) (string, error) {
+	release, err := releaseFor(options.Generation)
+	if err != nil {
+		return "", err
+	}
 	platform := options.Platform
 	if platform == "" {
 		var err error
@@ -202,14 +317,28 @@ func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
 			return "", err
 		}
 	}
-	artifact, ok := artifacts[platform]
+	artifact, ok := release.artifacts[platform]
 	if !ok {
 		return "", fmt.Errorf("%w: %s", ErrUnsupportedPlatform, platform)
 	}
+	return fetchWithOptions(ctx, options, release, artifact)
+}
+
+func fetchBaseWeights(ctx context.Context, options FetchOptions) (string, error) {
+	release, _ := releaseFor(3)
+	return fetchWithOptions(ctx, options, release, baseWeights)
+}
+
+func fetchWithOptions(
+	ctx context.Context,
+	options FetchOptions,
+	release engineRelease,
+	artifact engineArtifact,
+) (string, error) {
 	cacheDir := options.CacheDir
 	if cacheDir == "" {
 		var err error
-		cacheDir, err = defaultCacheDir()
+		cacheDir, err = defaultCacheDir(release)
 		if err != nil {
 			return "", err
 		}
@@ -221,7 +350,7 @@ func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
 
 	fetchMu.Lock()
 	defer fetchMu.Unlock()
-	return fetchArtifact(ctx, client, cacheDir, artifact, artifactURL(artifact))
+	return fetchArtifact(ctx, client, cacheDir, artifact, artifactURL(release, artifact))
 }
 
 func fetchArtifact(
@@ -253,8 +382,17 @@ func fetchArtifact(
 	if err := downloadArtifact(ctx, client, url, wheelPath, artifact.checksum); err != nil {
 		return "", err
 	}
-	if err := extractLibrary(wheelPath, cacheDir, target, artifact.archivePath); err != nil {
-		return "", err
+	if artifact.archivePath == "" {
+		if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("needle: replace cached weights: %w", err)
+		}
+		if err := os.Rename(wheelPath, target); err != nil {
+			return "", fmt.Errorf("needle: install weights: %w", err)
+		}
+	} else {
+		if err := extractLibrary(wheelPath, cacheDir, target, artifact.archivePath); err != nil {
+			return "", err
+		}
 	}
 	if err := os.WriteFile(marker, []byte(artifact.checksum+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("needle: write engine checksum marker: %w", err)
@@ -281,7 +419,7 @@ func downloadArtifact(ctx context.Context, client *http.Client, url, destination
 			return lastErr
 		}
 	}
-	return fmt.Errorf("needle: download engine after 3 attempts: %w", lastErr)
+	return fmt.Errorf("needle: download artifact after 3 attempts: %w", lastErr)
 }
 
 func downloadAttempt(ctx context.Context, client *http.Client, url, destination, checksum string) error {
@@ -384,21 +522,25 @@ func cachedArtifact(target, marker, checksum string) bool {
 	return err == nil && strings.TrimSpace(string(data)) == checksum
 }
 
-func artifactURL(artifact engineArtifact) string {
+func artifactURL(release engineRelease, artifact engineArtifact) string {
+	name := artifact.filename
+	if artifact.archivePath != "" {
+		name = "python/" + name
+	}
 	return fmt.Sprintf(
-		"https://huggingface.co/%s/resolve/%s/python/%s?download=true",
-		huggingFaceRepo,
-		huggingFaceRevision,
-		artifact.filename,
+		"https://huggingface.co/%s/resolve/%s/%s?download=true",
+		release.repo,
+		release.revision,
+		name,
 	)
 }
 
-func defaultCacheDir() (string, error) {
+func defaultCacheDir(release engineRelease) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("needle: find home directory: %w", err)
 	}
-	return filepath.Join(home, ".cache", "cactus-needle", EngineVersion), nil
+	return filepath.Join(home, ".cache", "cactus-needle", release.version), nil
 }
 
 func isMusl() bool {

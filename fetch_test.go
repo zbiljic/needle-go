@@ -32,7 +32,11 @@ func TestSupportedPlatforms(t *testing.T) {
 		PlatformWindowsAMD64,
 		PlatformWindowsARM64,
 	}
-	libraries := map[string]string{"darwin": "libneedle.dylib", "linux": "libneedle.so", "windows": "libneedle.dll"}
+	libraries := map[string]string{
+		"darwin":  "libneedle3.dylib",
+		"linux":   "libneedle3.so",
+		"windows": "libneedle3.dll",
+	}
 	if got := SupportedPlatforms(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("SupportedPlatforms() = %#v, want %#v", got, want)
 	}
@@ -196,16 +200,22 @@ func TestExtractLibraryRequiresExpectedMember(t *testing.T) {
 func TestArtifactURLPinsRevision(t *testing.T) {
 	t.Parallel()
 
-	for _, platform := range SupportedPlatforms() {
-		artifact := artifacts[platform]
-		want := fmt.Sprintf(
-			"https://huggingface.co/%s/resolve/%s/python/%s?download=true",
-			huggingFaceRepo,
-			huggingFaceRevision,
-			artifact.filename,
-		)
-		if got := artifactURL(artifact); got != want || strings.Contains(got, "/main/") {
-			t.Errorf("artifactURL(%s) = %q, want %q", platform, got, want)
+	for _, generation := range []int{2, 3} {
+		release, err := releaseFor(generation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, platform := range SupportedPlatforms() {
+			artifact := release.artifacts[platform]
+			want := fmt.Sprintf(
+				"https://huggingface.co/%s/resolve/%s/python/%s?download=true",
+				release.repo,
+				release.revision,
+				artifact.filename,
+			)
+			if got := artifactURL(release, artifact); got != want || strings.Contains(got, "/main/") {
+				t.Errorf("artifactURL(%s) = %q, want %q", platform, got, want)
+			}
 		}
 	}
 }
@@ -214,27 +224,107 @@ func TestPinnedEngineArtifacts(t *testing.T) {
 	if os.Getenv("NEEDLE_TEST_ARTIFACTS") != "1" {
 		t.Skip("set NEEDLE_TEST_ARTIFACTS=1 to verify pinned release artifacts")
 	}
-	for _, platform := range SupportedPlatforms() {
-		t.Run(string(platform), func(t *testing.T) {
-			artifact := artifacts[platform]
-			path, err := FetchEngine(context.Background(), FetchOptions{
-				Platform: platform,
-				CacheDir: t.TempDir(),
+	for _, generation := range []int{2, 3} {
+		cacheDir := t.TempDir()
+		release, _ := releaseFor(generation)
+		for _, platform := range SupportedPlatforms() {
+			t.Run(fmt.Sprintf("v%d/%s", generation, platform), func(t *testing.T) {
+				artifact := release.artifacts[platform]
+				path, err := FetchEngine(context.Background(), FetchOptions{
+					Generation: generation,
+					Platform:   platform,
+					CacheDir:   cacheDir,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if filepath.Base(path) != artifact.libraryName {
+					t.Fatalf("FetchEngine() path = %q, want library %q", path, artifact.libraryName)
+				}
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !info.Mode().IsRegular() || info.Size() == 0 {
+					t.Fatalf("FetchEngine() file mode = %v, size = %d", info.Mode(), info.Size())
+				}
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if filepath.Base(path) != artifact.libraryName {
-				t.Fatalf("FetchEngine() path = %q, want library %q", path, artifact.libraryName)
-			}
-			info, err := os.Stat(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !info.Mode().IsRegular() || info.Size() == 0 {
-				t.Fatalf("FetchEngine() file mode = %v, size = %d", info.Mode(), info.Size())
-			}
+		}
+	}
+}
+
+func TestFetchWeightsAndGenerationCacheIsolation(t *testing.T) {
+	t.Parallel()
+	cache := t.TempDir()
+	body := []byte{0x84, 0x2a, 0xe1, 0x05, 1}
+	digest := sha256.Sum256(body)
+	artifact := engineArtifact{
+		filename:    "needle3.cact",
+		libraryName: "needle3.cact",
+		checksum:    hex.EncodeToString(digest[:]),
+	}
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	for range 2 {
+		path, err := fetchArtifact(context.Background(), server.Client(), cache, artifact, server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(got, body) {
+			t.Fatalf("weights=%v err=%v", got, err)
+		}
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("downloads=%d", requests.Load())
+	}
+	// A failed checksum cannot replace the previously installed weights.
+	bad := artifact
+	bad.checksum = strings.Repeat("0", 64)
+	if _, err := fetchArtifact(
+		context.Background(), server.Client(), cache, bad, server.URL,
+	); err == nil {
+		t.Fatal("accepted a bad checksum")
+	}
+	got, err := os.ReadFile(filepath.Join(cache, artifact.libraryName))
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("existing weights changed: %v, %v", got, err)
+	}
+	paths := make(map[int]string)
+	for _, generation := range []int{2, 3} {
+		release, _ := releaseFor(generation)
+		library := release.artifacts[PlatformDarwinARM64]
+		path := filepath.Join(cache, library.libraryName)
+		if err := os.WriteFile(path, []byte{byte(generation)}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths[generation] = path
+	}
+	for _, generation := range []int{2, 3} {
+		path, err := CachedEngine(FetchOptions{
+			Generation: generation,
+			Platform:   PlatformDarwinARM64,
+			CacheDir:   cache,
 		})
+		if err != nil || path != paths[generation] || paths[2] == paths[3] {
+			t.Fatalf("cache paths=%v got=%s err=%v", paths, path, err)
+		}
+	}
+	release, _ := releaseFor(3)
+	if strings.Contains(artifactURL(release, baseWeights), "/python/") {
+		t.Fatal("weights URL points inside python/")
+	}
+	for _, generation := range []int{-1, 1, 4} {
+		if _, err := FetchEngine(context.Background(), FetchOptions{Generation: generation}); err == nil {
+			t.Fatalf("accepted generation %d", generation)
+		}
+		if _, err := CachedEngine(FetchOptions{Generation: generation}); err == nil {
+			t.Fatalf("accepted cached generation %d", generation)
+		}
 	}
 }
 

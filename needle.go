@@ -7,10 +7,12 @@ import (
 )
 
 const (
+	// DefaultGeneration is used when no generation or custom weights are selected.
+	DefaultGeneration = 3
 	// DefaultMaxSteps is the default maximum number of tool-calling rounds.
 	DefaultMaxSteps = 8
 	// DefaultMaxNewTokens is the default generation limit for each completion.
-	DefaultMaxNewTokens = 256
+	DefaultMaxNewTokens = 512
 	// DefaultBufferSize is the default native response buffer size.
 	DefaultBufferSize = 64 * 1024
 )
@@ -44,13 +46,15 @@ type Response struct {
 	Error         *string        `json:"error"`
 	ErrorCode     *string        `json:"error_code"`
 	FunctionCalls []FunctionCall `json:"function_calls"`
-	Reasoning     string         `json:"reasoning"`
-	Confidence    *float64       `json:"confidence"`
-	PrefillTPS    float64        `json:"prefill_tps"`
-	DecodeTPS     float64        `json:"decode_tps"`
-	PeakRAMMB     float64        `json:"peak_ram_mb"`
-	Results       []any          `json:"results,omitempty"`
-	Validation    *Validation    `json:"validation,omitempty"`
+	// SuppressedCalls are withheld by the engine and must not be executed automatically.
+	SuppressedCalls []FunctionCall `json:"suppressed_calls,omitempty"`
+	Reasoning       string         `json:"reasoning"`
+	Confidence      *float64       `json:"confidence"`
+	PrefillTPS      float64        `json:"prefill_tps"`
+	DecodeTPS       float64        `json:"decode_tps"`
+	PeakRAMMB       float64        `json:"peak_ram_mb"`
+	Results         []any          `json:"results,omitempty"`
+	Validation      *Validation    `json:"validation,omitempty"`
 }
 
 // ToolSchema describes a function that the model may call.
@@ -75,18 +79,21 @@ type Tool struct {
 type Config struct {
 	Tools  []Tool
 	System string
-	// WeightsPath selects Needle 2 .cact weights. The header check does not
+	// Generation selects 2 or 3. Zero defaults to 3; WeightsPath takes precedence.
+	Generation int
+	// WeightsPath selects custom .cact weights and determines the generation.
+	// Custom weights disable calibrated confidence. The header check does not
 	// validate the remaining bytes or engine revision compatibility; those are
 	// left to the native loader.
 	WeightsPath   string
 	ToolIndexPath string
 	BufferSize    int
 
-	// LibraryPath selects a trusted, Needle 2 ABI-compatible shared library.
-	// When empty, New checks NEEDLE_LIB_PATH and then fetches the engine for
-	// this platform. NEEDLE_LIB_PATH must also name a trusted, compatible library.
+	// LibraryPath selects a trusted shared library for the selected generation.
+	// When empty, New checks NEEDLE2_LIB_PATH or NEEDLE3_LIB_PATH, then fetches
+	// the engine. NEEDLE_LIB_PATH is a legacy override for generation 2 only.
 	LibraryPath string
-	// CacheDir overrides the engine download directory.
+	// CacheDir overrides the engine and base-weight download directory.
 	CacheDir string
 }
 

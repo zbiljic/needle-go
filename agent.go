@@ -14,6 +14,8 @@ import (
 
 type agent struct {
 	runtime       *processRuntime
+	generation    int
+	tuned         bool
 	handlers      map[string]ToolHandler
 	system        []byte
 	tools         []byte
@@ -22,9 +24,8 @@ type agent struct {
 	buffer        []byte
 }
 
-// New initializes an Agent. Unless Config.LibraryPath or NEEDLE_LIB_PATH names
-// an existing shared library, New downloads and caches the engine for the
-// current desktop platform.
+// New initializes an Agent, downloading the selected engine and any required
+// base weights when they are not cached. Generation 3 is the default.
 func New(ctx context.Context, config Config) (Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -34,24 +35,50 @@ func New(ctx context.Context, config Config) (Agent, error) {
 		return nil, err
 	}
 
+	config.Generation = prepared.generation
 	libraryPath, err := resolveLibraryPath(ctx, config)
 	if err != nil {
 		return nil, err
 	}
-	prepared.runtime = &defaultRuntime
+	if prepared.generation == 3 && !prepared.tuned {
+		prepared.weightsPath, err = fetchBaseWeights(ctx, FetchOptions{
+			Generation: prepared.generation,
+			CacheDir:   config.CacheDir,
+		})
+		if err != nil {
+			return nil, err
+		}
+		prepared.weightsPath, err = filepath.Abs(prepared.weightsPath)
+		if err != nil {
+			return nil, fmt.Errorf("needle: resolve base weights path: %w", err)
+		}
+	}
+	prepared.runtime = runtimes[prepared.generation]
 
-	defaultRuntime.mu.Lock()
-	defer defaultRuntime.mu.Unlock()
-	if err := defaultRuntime.ensureLibraryLocked(libraryPath); err != nil {
+	prepared.runtime.mu.Lock()
+	defer prepared.runtime.mu.Unlock()
+	if err := prepared.runtime.ensureLibraryLocked(libraryPath); err != nil {
 		return nil, err
 	}
-	if err := defaultRuntime.bindLocked(prepared); err != nil {
+	if err := prepared.runtime.bindLocked(prepared); err != nil {
 		return nil, err
 	}
 	return prepared, nil
 }
 
 func prepareAgent(config Config) (*agent, error) {
+	generation := config.Generation
+	if config.WeightsPath != "" {
+		var err error
+		generation, err = WeightsGeneration(config.WeightsPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	release, err := releaseFor(generation)
+	if err != nil {
+		return nil, err
+	}
 	schemas := make([]ToolSchema, 0, len(config.Tools))
 	handlers := make(map[string]ToolHandler, len(config.Tools))
 	seen := make(map[string]struct{}, len(config.Tools))
@@ -108,6 +135,8 @@ func prepareAgent(config Config) (*agent, error) {
 	}
 
 	return &agent{
+		generation:    release.generation,
+		tuned:         config.WeightsPath != "",
 		handlers:      handlers,
 		system:        system,
 		tools:         tools,
@@ -120,7 +149,14 @@ func prepareAgent(config Config) (*agent, error) {
 func resolveLibraryPath(ctx context.Context, config Config) (string, error) {
 	path := config.LibraryPath
 	if path == "" {
-		path = os.Getenv(EnvLibraryPath)
+		release, err := releaseFor(config.Generation)
+		if err != nil {
+			return "", err
+		}
+		path = os.Getenv(fmt.Sprintf("NEEDLE%d_LIB_PATH", release.generation))
+		if path == "" && release.generation == 2 {
+			path = os.Getenv(EnvLibraryPath)
+		}
 	}
 	if path != "" {
 		absolute, err := filepath.Abs(path)
@@ -129,7 +165,10 @@ func resolveLibraryPath(ctx context.Context, config Config) (string, error) {
 		}
 		return absolute, nil
 	}
-	return FetchEngine(ctx, FetchOptions{CacheDir: config.CacheDir})
+	return fetchEngineLibrary(ctx, FetchOptions{
+		Generation: config.Generation,
+		CacheDir:   config.CacheDir,
+	})
 }
 
 func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Response, error) {
@@ -185,7 +224,7 @@ func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Re
 	if response.Type == "" {
 		return Response{}, errors.New("needle: response type is empty")
 	}
-	if a.weightsPath != "" {
+	if a.tuned {
 		response.Confidence = nil
 	}
 	return response, nil

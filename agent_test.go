@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -127,6 +128,7 @@ func TestPrepareAgentValidatesConfig(t *testing.T) {
 		{name: "small buffer", config: Config{BufferSize: 1}},
 		{name: "large buffer", config: Config{BufferSize: int(^uint32(0))}},
 		{name: "NUL system", config: Config{System: "bad\x00value"}},
+		{name: "invalid generation", config: Config{Generation: 4}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -579,7 +581,7 @@ func TestRuntimeRetainsTunedWeights(t *testing.T) {
 		t.Fatalf("load calls = %d, want 1", fake.loads)
 	}
 
-	base, err := prepareAgent(Config{})
+	base, err := prepareAgent(Config{Generation: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,11 +631,6 @@ func TestRejectWeightsGeneration(t *testing.T) {
 			wantError: "needle: weights header is truncated",
 		},
 		{
-			name:      "Needle 3",
-			blob:      []byte{0x84, 0x2a, 0xe1, 0x05, 1},
-			wantError: "needle: Needle 3 weights are unsupported; requires Needle 2",
-		},
-		{
 			name:      "unknown",
 			blob:      []byte{0, 0, 0, 1},
 			wantError: "needle: unknown weights header 0x01000000",
@@ -646,8 +643,8 @@ func TestRejectWeightsGeneration(t *testing.T) {
 		{
 			name:      "load failure",
 			blob:      []byte{0x83, 0x2a, 0xe1, 0x05, 1},
-			loadCode:  7,
-			wantError: "needle: load weights failed with code 7",
+			loadCode:  -7,
+			wantError: "needle: load weights failed with code -7",
 			wantLoads: 1,
 		},
 	}
@@ -660,16 +657,15 @@ func TestRejectWeightsGeneration(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			prepared, err := prepareAgent(Config{WeightsPath: weightsPath})
-			if err != nil {
-				t.Fatal(err)
-			}
 			fake := &fakeNative{loadCode: test.loadCode}
 			runtime := &processRuntime{api: fake.api(), libraryPath: "test"}
-			prepared.runtime = runtime
-			runtime.mu.Lock()
-			err = runtime.bindLocked(prepared)
-			runtime.mu.Unlock()
+			prepared, err := prepareAgent(Config{WeightsPath: weightsPath})
+			if err == nil {
+				prepared.runtime = runtime
+				runtime.mu.Lock()
+				err = runtime.bindLocked(prepared)
+				runtime.mu.Unlock()
+			}
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("bindLocked() error = %v, want %q", err, test.wantError)
 			}
@@ -703,8 +699,7 @@ func TestRejectWeightsGeneration(t *testing.T) {
 		if err := os.WriteFile(validPath, validBlob, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		invalidBlob := []byte{0x84, 0x2a, 0xe1, 0x05}
-		if err := os.WriteFile(invalidPath, invalidBlob, 0o600); err != nil {
+		if err := os.WriteFile(invalidPath, validBlob, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		fake := &fakeNative{}
@@ -727,10 +722,14 @@ func TestRejectWeightsGeneration(t *testing.T) {
 			t.Fatal(err)
 		}
 		invalid.runtime = runtime
+		// Detect a weights file replaced with another generation after preparation.
+		if err := os.WriteFile(invalidPath, []byte{0x84, 0x2a, 0xe1, 0x05}, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		runtime.mu.Lock()
 		err = runtime.bindLocked(invalid)
 		runtime.mu.Unlock()
-		if err == nil || !strings.Contains(err.Error(), "Needle 3 weights are unsupported") {
+		if err == nil || !strings.Contains(err.Error(), "weights generation changed") {
 			t.Fatalf("bindLocked() error = %v", err)
 		}
 		if runtime.active != active ||
@@ -751,6 +750,124 @@ func TestRejectWeightsGeneration(t *testing.T) {
 			)
 		}
 	})
+}
+
+func TestGenerationSelectionAndBaseConfidence(t *testing.T) {
+	t.Parallel()
+	for _, generation := range []int{2, 3} {
+		path := t.TempDir() + "/weights.cact"
+		blob := []byte{byte(0x81 + generation), 0x2a, 0xe1, 0x05, 1}
+		if err := os.WriteFile(path, blob, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		base, err := prepareAgent(Config{Generation: generation})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A configured weights header takes precedence over the generation option.
+		tuned, err := prepareAgent(Config{
+			Generation:  5 - generation,
+			WeightsPath: path,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tuned.generation != generation || !tuned.tuned || base.tuned {
+			t.Fatalf("generation %d: base=%+v tuned=%+v", generation, base, tuned)
+		}
+		fake := &fakeNative{loadCode: 1}
+		runtime := &processRuntime{api: fake.api()}
+		base.runtime, tuned.runtime = runtime, runtime
+		if generation == 3 {
+			base.weightsPath = path
+		}
+		init := runtime.api.init
+		runtime.api.init = func(system, tools, index *byte) int32 {
+			if generation == 3 && fake.loads == 0 {
+				t.Fatal("init ran before base weights loaded")
+			}
+			return init(system, tools, index)
+		}
+		for _, a := range []*agent{base, tuned, base} {
+			fake.responses = append(fake.responses,
+				[]byte(`{"type":"call","confidence":0.9,"function_calls":[]}`),
+			)
+			r, err := a.Complete(context.Background(), "hello", 0)
+			if generation == 2 && a == base && fake.loads > 0 {
+				if err == nil || !strings.Contains(err.Error(), "cannot be unloaded") {
+					t.Fatalf("v2 base after tuned: %v", err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (r.Confidence == nil) != a.tuned {
+				t.Fatalf("tuned=%v confidence=%v", a.tuned, r.Confidence)
+			}
+		}
+		if fake.loads != 1 || !reflect.DeepEqual(runtime.activeBlob, blob) {
+			t.Fatalf("v%d loads=%d retained=%v", generation, fake.loads, runtime.activeBlob)
+		}
+	}
+	base, err := prepareAgent(Config{})
+	if err != nil || base.generation != 3 || runtimes[2] == runtimes[3] {
+		t.Fatalf("default generation or runtime isolation: %+v, %v", base, err)
+	}
+}
+
+func TestLibraryOverridesByGeneration(t *testing.T) {
+	t.Setenv("NEEDLE_LIB_PATH", "/legacy/v2")
+	t.Setenv("NEEDLE2_LIB_PATH", "")
+	t.Setenv("NEEDLE3_LIB_PATH", "/current/v3")
+	for _, test := range []struct {
+		generation     int
+		explicit, want string
+	}{
+		{0, "", "/current/v3"},
+		{2, "", "/legacy/v2"},
+		{3, "", "/current/v3"},
+		{3, "/explicit/v3", "/explicit/v3"},
+	} {
+		got, err := resolveLibraryPath(context.Background(), Config{
+			Generation:  test.generation,
+			LibraryPath: test.explicit,
+		})
+		want, _ := filepath.Abs(test.want)
+		if err != nil || got != want {
+			t.Fatalf("generation %d: got %q, %v; want %q", test.generation, got, err, want)
+		}
+	}
+	t.Setenv("NEEDLE2_LIB_PATH", "/current/v2")
+	got, err := resolveLibraryPath(context.Background(), Config{Generation: 2})
+	want, _ := filepath.Abs("/current/v2")
+	if err != nil || got != want {
+		t.Fatalf("v2 override: %q, %v", got, err)
+	}
+}
+
+func TestRunPreservesSuppressedCallsWithoutExecution(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNative{responses: [][]byte{
+		[]byte(`{"type":"call","function_calls":[],"suppressed_calls":[{"name":"action","arguments":{}}]}`),
+	}}
+	a, _ := newTestAgent(t, fake, Config{
+		Tools: []Tool{{
+			Schema: ToolSchema{Name: "action"},
+			Handler: func(context.Context, json.RawMessage) (any, error) {
+				t.Fatal("executed a suppressed call")
+				return nil, nil
+			},
+		}},
+	})
+	r, err := a.Run(context.Background(), "query", 0, 0)
+	if err != nil || len(r.SuppressedCalls) != 1 || len(r.Results) != 0 {
+		t.Fatalf("response=%+v err=%v", r, err)
+	}
+	data, err := json.Marshal(r)
+	if err != nil || !strings.Contains(string(data), `"suppressed_calls"`) {
+		t.Fatalf("JSON=%s err=%v", data, err)
+	}
 }
 
 func readCString(pointer *byte) string {

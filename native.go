@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,7 +37,40 @@ type processRuntime struct {
 	activeBlob    []byte
 }
 
-var defaultRuntime processRuntime
+var runtimes = map[int]*processRuntime{2: {}, 3: {}}
+
+// WeightsGeneration reads a .cact header and returns its model generation.
+// It does not validate the rest of the archive.
+func WeightsGeneration(path string) (int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("needle: read weights: %w", err)
+	}
+	defer file.Close()
+	var header [4]byte
+	n, err := io.ReadFull(file, header[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return 0, fmt.Errorf("needle: read weights: %w", err)
+	}
+	return weightsGeneration(header[:n])
+}
+
+func weightsGeneration(blob []byte) (int, error) {
+	if len(blob) == 0 {
+		return 0, errors.New("needle: weights file is empty")
+	}
+	if len(blob) < 4 {
+		return 0, errors.New("needle: weights header is truncated")
+	}
+	switch tag := binary.LittleEndian.Uint32(blob[:4]); tag {
+	case needle2WeightsTag:
+		return 2, nil
+	case needle3WeightsTag:
+		return 3, nil
+	default:
+		return 0, fmt.Errorf("needle: unknown weights header 0x%08x", tag)
+	}
+}
 
 func (r *processRuntime) ensureLibraryLocked(path string) error {
 	absolute, err := filepath.Abs(path)
@@ -76,24 +110,21 @@ func (r *processRuntime) bindLocked(a *agent) error {
 		if err != nil {
 			return fmt.Errorf("needle: read weights: %w", err)
 		}
-		if len(blob) == 0 {
-			return errors.New("needle: weights file is empty")
+		generation, err := weightsGeneration(blob)
+		if err != nil {
+			return err
 		}
-		if len(blob) < 4 {
-			return errors.New("needle: weights header is truncated")
+		if generation != a.generation {
+			return fmt.Errorf(
+				"needle: weights generation changed: got %d, want %d", generation, a.generation,
+			)
 		}
-		switch tag := binary.LittleEndian.Uint32(blob[:4]); tag {
-		case needle2WeightsTag:
-		case needle3WeightsTag:
-			return errors.New("needle: Needle 3 weights are unsupported; requires Needle 2")
-		default:
-			return fmt.Errorf("needle: unknown weights header 0x%08x", tag)
-		}
-		if code := r.api.load(blob, uint64(len(blob))); code != 0 {
+		if code := r.api.load(blob, uint64(len(blob))); code < 0 {
 			return fmt.Errorf("needle: load weights failed with code %d", code)
 		}
 		r.activeBlob = blob
 		r.activeWeights = a.weightsPath
+		r.active = nil
 	}
 	if code := r.api.init(bytePointer(a.system), bytePointer(a.tools), bytePointer(a.toolIndexPath)); code < 0 {
 		r.active = nil
