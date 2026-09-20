@@ -95,10 +95,21 @@ jobs:
           key: needle-engine-${{ matrix.platform }}-${{ hashFiles('fetch.go') }}
 
       - name: Fetch native engine
-        run: go run ./cmd/needlez fetch
+        run: |
+          go run ./cmd/needlez fetch --generation 2
+          go run ./cmd/needlez fetch --generation 3
 
       - name: Run native smoke test
-        run: go run ./cmd/needlez doctor --smoke
+        run: |
+          go run ./cmd/needlez doctor --generation 2 --smoke
+          go run ./cmd/needlez doctor --generation 3 --smoke
 
       - name: Run native conformance tests
-        run: go run ./cmd/needlez test
+        run: |
+          go run ./cmd/needlez test --generation 2
+          go run ./cmd/needlez test --generation 3
+
+      - name: Test generations together
+        env:
+          NEEDLE_TEST_NATIVE: "1"
+        run: go test -run '^TestNativeGenerations$' -v .
