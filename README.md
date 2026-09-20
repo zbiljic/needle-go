@@ -7,7 +7,8 @@ tool-calling model.
 It provides:
 
 - CGO-free native engine loading
-- automatic, checksum-verified engine downloads
+- Needle 2 and Needle 3, with Needle 3 as the default
+- automatic, checksum-verified engine and base-weight downloads
 - high-level and manual completion loops
 - typed Go tool handlers
 - structured response extraction
@@ -69,10 +70,46 @@ func main() {
 }
 ```
 
-`needle.New` downloads and caches the matching native engine from the
-[Needle 2 model repository](https://huggingface.co/Cactus-Compute/needle2) when
-one is not already available. Set `NEEDLE_LIB_PATH` to use an existing engine
-library instead.
+By default, `needle.New` downloads and caches the pinned Needle 3 engine
+(3.0.1) and its `needle3.cact` base weights (~35 MB) from the
+[Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
+Subsequent runs use the cached files. No Python installation is required.
+
+## Model generations
+
+Use `Generation: 2` for the embedded Needle 2 model (engine 2.0.4):
+
+```go
+agent, err := needle.New(ctx, needle.Config{
+	Generation: 2,
+	Tools:      tools,
+})
+```
+
+`Generation: 0` and `Generation: 3` select Needle 3. A custom `WeightsPath`
+selects the compatible engine from the `.cact` header, taking precedence over
+`Generation`. Supplying `WeightsPath` makes `Confidence == nil`, even if the
+file contains base weights. Automatically loaded base weights retain the
+engine's confidence scores.
+
+Both generations can run in the same process, with separate native runtimes.
+Within one generation, switching agents reinitializes the active conversation.
+After loading custom Needle 2 weights, returning to its embedded base model
+requires a separate process. Needle 3 can reload its base archive.
+
+Use `LibraryPath` for an existing, trusted engine matching the selected
+generation. When `LibraryPath` is empty, environment overrides are
+`NEEDLE2_LIB_PATH` and `NEEDLE3_LIB_PATH`; the legacy `NEEDLE_LIB_PATH` is a
+fallback for Needle 2 only. A Needle 3 library override still downloads missing
+base weights unless `WeightsPath` is supplied.
+
+`FetchEngine` prepares the library and required base weights for offline use.
+`FetchOptions.Generation` selects the generation. Default caches are under
+`~/.cache/cactus-needle/<engine-version>`; `CacheDir` selects an exact directory.
+V2 uses `libneedle.*`, while v3 uses `libneedle3.*`, so the generations can share
+a custom cache directory for the same platform. For offline use, fetch for the
+target platform and generation, preserve the `.sha256` marker files, and use
+the same cache directory at runtime. `CachedEngine` checks only for the library.
 
 ## Native engine diagnostics
 
@@ -83,6 +120,17 @@ go run github.com/zbiljic/needle-go/cmd/needlez@latest fetch
 go run github.com/zbiljic/needle-go/cmd/needlez@latest doctor --smoke
 go run github.com/zbiljic/needle-go/cmd/needlez@latest test
 ```
+
+To run the checks against Needle 2 from a repository checkout:
+
+```sh
+go run ./cmd/needlez fetch --generation 2
+go run ./cmd/needlez doctor --generation 2 --smoke
+go run ./cmd/needlez test --generation 2
+```
+
+Responses preserve `suppressed_calls` for inspection. `Run` executes only
+`function_calls`; it never executes suppressed calls automatically.
 
 ## Examples
 
