@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 )
@@ -270,7 +269,7 @@ func CachedEngine(options FetchOptions) (string, error) {
 	cacheDir := options.CacheDir
 	if cacheDir == "" {
 		var err error
-		cacheDir, err = defaultCacheDir(release)
+		cacheDir, err = defaultCacheDir(release, platform)
 		if err != nil {
 			return "", err
 		}
@@ -338,7 +337,7 @@ func fetchWithOptions(
 	cacheDir := options.CacheDir
 	if cacheDir == "" {
 		var err error
-		cacheDir, err = defaultCacheDir(release)
+		cacheDir, err = defaultCacheDir(release, options.Platform)
 		if err != nil {
 			return "", err
 		}
@@ -394,7 +393,11 @@ func fetchArtifact(
 			return "", err
 		}
 	}
-	if err := os.WriteFile(marker, []byte(artifact.checksum+"\n"), 0o644); err != nil {
+	installedHash, err := installedChecksum(target)
+	if err != nil {
+		return "", fmt.Errorf("needle: hash installed artifact: %w", err)
+	}
+	if err := os.WriteFile(marker, []byte(artifact.checksum+"\n"+installedHash+"\n"), 0o644); err != nil {
 		return "", fmt.Errorf("needle: write engine checksum marker: %w", err)
 	}
 	return target, nil
@@ -514,12 +517,36 @@ func extractLibrary(wheelPath, cacheDir, target, archivePath string) error {
 }
 
 func cachedArtifact(target, marker, checksum string) bool {
-	info, err := os.Stat(target)
-	if err != nil || !info.Mode().IsRegular() {
+	installedHash, err := installedChecksum(target)
+	if err != nil {
 		return false
 	}
 	data, err := os.ReadFile(marker)
-	return err == nil && strings.TrimSpace(string(data)) == checksum
+	return err == nil && string(data) == checksum+"\n"+installedHash+"\n"
+}
+
+func installedChecksum(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxArtifactSize {
+		return "", errors.New("invalid cached artifact size or type")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	written, err := io.Copy(hash, io.LimitReader(file, maxArtifactSize+1))
+	if err != nil {
+		return "", err
+	}
+	if written == 0 || written > maxArtifactSize {
+		return "", errors.New("invalid cached artifact size")
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func artifactURL(release engineRelease, artifact engineArtifact) string {
@@ -535,12 +562,22 @@ func artifactURL(release engineRelease, artifact engineArtifact) string {
 	)
 }
 
-func defaultCacheDir(release engineRelease) (string, error) {
+func defaultCacheDir(release engineRelease, platform Platform) (string, error) {
+	if platform == "" {
+		var err error
+		platform, err = CurrentPlatform()
+		if err != nil {
+			return "", err
+		}
+	}
+	if _, ok := release.artifacts[platform]; !ok {
+		return "", fmt.Errorf("%w: %s", ErrUnsupportedPlatform, platform)
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("needle: find home directory: %w", err)
 	}
-	return filepath.Join(home, ".cache", "cactus-needle", release.version), nil
+	return filepath.Join(home, ".cache", "cactus-needle", release.version, string(platform)), nil
 }
 
 func isMusl() bool {

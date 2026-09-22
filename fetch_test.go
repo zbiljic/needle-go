@@ -133,9 +133,93 @@ func TestFetchArtifactDownloadsVerifiesAndCaches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.TrimSpace(string(marker)) != artifact.checksum {
+	installedDigest := sha256.Sum256([]byte(libraryContents))
+	if string(marker) != fmt.Sprintf("%s\n%x\n", artifact.checksum, installedDigest) {
 		t.Fatalf("checksum marker = %q", marker)
 	}
+	for _, corruption := range []string{"file", "artifact hash", "installed hash"} {
+		switch corruption {
+		case "file":
+			err = os.WriteFile(path, []byte("changed library"), 0o600)
+		case "artifact hash":
+			err = os.WriteFile(path+".sha256", []byte(fmt.Sprintf("%s\n%x\n", strings.Repeat("0", 64), installedDigest)), 0o600)
+		case "installed hash":
+			err = os.WriteFile(path+".sha256", []byte(artifact.checksum+"\n"+strings.Repeat("0", 64)+"\n"), 0o600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := requests.Load()
+		if _, err := fetchArtifact(context.Background(), server.Client(), cacheDir, artifact, server.URL); err != nil {
+			t.Fatal(err)
+		}
+		if requests.Load() != before+1 {
+			t.Fatalf("%s did not trigger a fresh download", corruption)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != libraryContents {
+			t.Fatalf("repaired library = %q, err = %v", got, err)
+		}
+	}
+}
+
+func TestVerifiedCacheReuse(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	client := &http.Client{Transport: rejectCacheDownload{}}
+	current, err := CurrentPlatform()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, generation := range []int{2, 3} {
+		release, _ := releaseFor(generation)
+		for _, platform := range []Platform{PlatformDarwinARM64, PlatformDarwinAMD64, current, ""} {
+			resolved := platform
+			if resolved == "" {
+				resolved = current
+			}
+			for _, override := range []string{"", t.TempDir()} {
+				options := FetchOptions{Generation: generation, Platform: platform, CacheDir: override, Client: client}
+				directory := override
+				if directory == "" {
+					directory = filepath.Join(home, ".cache", "cactus-needle", release.version, string(resolved))
+				}
+				if err := os.MkdirAll(directory, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				library := release.artifacts[resolved]
+				cached := []engineArtifact{library}
+				if generation == 3 {
+					cached = append(cached, baseWeights)
+				}
+				for _, artifact := range cached {
+					contents := []byte("cached " + artifact.libraryName)
+					path := filepath.Join(directory, artifact.libraryName)
+					if err := os.WriteFile(path, contents, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					marker := fmt.Sprintf("%s\n%x\n", artifact.checksum, sha256.Sum256(contents))
+					if err := os.WriteFile(path+".sha256", []byte(marker), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				want := filepath.Join(directory, library.libraryName)
+				if got, err := FetchEngine(context.Background(), options); err != nil || got != want {
+					t.Fatalf("FetchEngine(%+v) = %q, %v; want %q", options, got, err, want)
+				}
+				if got, err := CachedEngine(options); err != nil || got != want {
+					t.Fatalf("CachedEngine(%+v) = %q, %v; want %q", options, got, err, want)
+				}
+			}
+		}
+	}
+}
+
+type rejectCacheDownload struct{}
+
+func (rejectCacheDownload) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("unexpected download for shared cache")
 }
 
 func TestDownloadAttemptRejectsChecksumMismatch(t *testing.T) {

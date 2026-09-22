@@ -105,11 +105,14 @@ base weights unless `WeightsPath` is supplied.
 
 `FetchEngine` prepares the library and required base weights for offline use.
 `FetchOptions.Generation` selects the generation. Default caches are under
-`~/.cache/cactus-needle/<engine-version>`; `CacheDir` selects an exact directory.
+`~/.cache/cactus-needle/<engine-version>/<platform>/`;
+`CacheDir` selects an exact directory.
 V2 uses `libneedle.*`, while v3 uses `libneedle3.*`, so the generations can share
 a custom cache directory for the same platform. For offline use, fetch for the
 target platform and generation, preserve the `.sha256` marker files, and use
-the same cache directory at runtime. `CachedEngine` checks only for the library.
+the same cache directory at runtime. Markers contain the downloaded artifact hash
+and installed file hash; cached downloads verify both. `CachedEngine` checks only
+for the library and trusts the caller's file.
 
 ## Native engine diagnostics
 
