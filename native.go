@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -20,11 +21,28 @@ const (
 var ErrUnsupportedPlatform = errors.New("needle: unsupported platform")
 
 type nativeAPI struct {
-	handle   uintptr
-	init     func(*byte, *byte, *byte) int32
-	complete func(*byte, int32, []byte, int32) int32
-	reset    func()
-	load     func([]byte, uint64) int32
+	handle        uintptr
+	init          func(*byte, *byte, *byte) int32
+	complete      func(*byte, int32, []byte, int32) int32
+	completeAudio func(*byte, *float32, int32, int32, []byte, int32) int32
+	lastError     func() string
+	reset         func()
+	load          func([]byte, uint64) int32
+}
+
+// failure reads the process-global diagnostic before another native call can replace it.
+// The caller must hold the runtime mutex.
+func (api *nativeAPI) failure(operation string, code int32, fallback string) error {
+	if api.lastError != nil {
+		if detail := api.lastError(); strings.TrimSpace(detail) != "" {
+			fallback = detail
+		}
+	}
+	detail := strings.TrimSpace(strings.ToValidUTF8(fallback, "�"))
+	if detail != "" {
+		return fmt.Errorf("needle: %s failed with code %d: %s", operation, code, detail)
+	}
+	return fmt.Errorf("needle: %s failed with code %d", operation, code)
 }
 
 type processRuntime struct {
@@ -120,7 +138,7 @@ func (r *processRuntime) bindLocked(a *agent) error {
 			)
 		}
 		if code := r.api.load(blob, uint64(len(blob))); code < 0 {
-			return fmt.Errorf("needle: load weights failed with code %d", code)
+			return r.api.failure("load weights", code, "")
 		}
 		r.activeBlob = blob
 		r.activeWeights = a.weightsPath
@@ -128,7 +146,7 @@ func (r *processRuntime) bindLocked(a *agent) error {
 	}
 	if code := r.api.init(bytePointer(a.system), bytePointer(a.tools), bytePointer(a.toolIndexPath)); code < 0 {
 		r.active = nil
-		return fmt.Errorf("needle: initialize failed with code %d", code)
+		return r.api.failure("initialize", code, "")
 	}
 	r.active = a
 	return nil

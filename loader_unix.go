@@ -20,24 +20,3 @@ func loadNative(path string) (*nativeAPI, error) {
 	}
 	return api, nil
 }
-
-func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error)) (*nativeAPI, error) {
-	api := &nativeAPI{handle: handle}
-	bindings := []struct {
-		name   string
-		target any
-	}{
-		{name: "needle_init", target: &api.init},
-		{name: "needle_complete", target: &api.complete},
-		{name: "needle_reset", target: &api.reset},
-		{name: "needle_load", target: &api.load},
-	}
-	for _, binding := range bindings {
-		address, err := symbol(handle, binding.name)
-		if err != nil {
-			return nil, fmt.Errorf("needle: resolve %s: %w", binding.name, err)
-		}
-		purego.RegisterFunc(binding.target, address)
-	}
-	return api, nil
-}

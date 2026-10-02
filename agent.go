@@ -206,11 +206,7 @@ func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Re
 		if end < 0 {
 			end = len(a.buffer)
 		}
-		detail := strings.TrimSpace(strings.ToValidUTF8(string(a.buffer[:end]), "�"))
-		if detail == "" {
-			return Response{}, fmt.Errorf("needle: complete failed with code %d", code)
-		}
-		return Response{}, fmt.Errorf("needle: complete failed with code %d: %s", code, detail)
+		return Response{}, a.runtime.api.failure("complete", code, string(a.buffer[:end]))
 	}
 
 	end := bytes.IndexByte(a.buffer, 0)

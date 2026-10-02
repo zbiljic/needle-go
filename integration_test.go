@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,10 @@ func TestNativeGenerations(t *testing.T) {
 			t.Fatalf("generation %d: %v", generation, err)
 		}
 		agents = append(agents, a)
+		api := runtimes[generation].api
+		if (api.completeAudio != nil) != (generation == 3) || (generation == 3 && api.lastError == nil) {
+			t.Fatalf("generation %d: unexpected native ABI", generation)
+		}
 	}
 	// Alternate generations after both libraries have been loaded.
 	for range 2 {
@@ -72,5 +77,19 @@ func TestNativeGenerations(t *testing.T) {
 		if err != nil || !r.Success || (r.Confidence == nil) != (a == custom) {
 			t.Fatalf("custom=%v response=%+v err=%v", a == custom, r, err)
 		}
+	}
+}
+
+func TestNativeEngineDiagnostics(t *testing.T) {
+	if os.Getenv("NEEDLE_TEST_NATIVE") != "1" {
+		t.Skip("set NEEDLE_TEST_NATIVE=1 to test native diagnostics")
+	}
+	_, err := New(context.Background(), Config{System: strings.Repeat("long context ", 10000)})
+	if err == nil {
+		t.Fatal("oversized system prompt was accepted")
+	}
+	_, detail, ok := strings.Cut(err.Error(), "initialize failed with code ")
+	if !ok || !strings.Contains(detail, ": ") {
+		t.Fatalf("native initialization diagnostic = %v", err)
 	}
 }

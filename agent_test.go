@@ -275,6 +275,52 @@ func TestCompleteNativeErrorDetail(t *testing.T) {
 	})
 }
 
+func TestNativeLastErrorDiagnostics(t *testing.T) {
+	for _, operation := range []string{"complete", "initialize", "load weights"} {
+		for _, detail := range []string{" native\xffdetail ", ""} {
+			t.Run(operation+"/"+detail, func(t *testing.T) {
+				fake := &fakeNative{}
+				a, runtime := newTestAgent(t, fake, Config{})
+				runtime.api.lastError = func() string {
+					if runtime.mu.TryLock() {
+						runtime.mu.Unlock()
+						t.Fatal("last error read outside runtime lock")
+					}
+					return detail
+				}
+				var err error
+				switch operation {
+				case "complete":
+					fake.completeCode = -7
+					fake.responses = [][]byte{[]byte("buffer detail")}
+					_, err = a.Complete(context.Background(), "hello", 1)
+				case "initialize":
+					fake.initCode = -7
+					runtime.active = nil
+					err = a.Reset(context.Background())
+				case "load weights":
+					a.weightsPath = filepath.Join(t.TempDir(), "weights.cact")
+					if err := os.WriteFile(a.weightsPath, []byte{0x84, 0x2a, 0xe1, 0x05}, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					fake.loadCode = -7
+					runtime.active = nil
+					err = a.Reset(context.Background())
+				}
+				want := "needle: " + operation + " failed with code -7"
+				if detail != "" {
+					want += ": native�detail"
+				} else if operation == "complete" {
+					want += ": buffer detail"
+				}
+				if err == nil || err.Error() != want {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestRunExecutesToolsUntilResponse(t *testing.T) {
 	t.Parallel()
 

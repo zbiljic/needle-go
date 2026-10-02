@@ -71,7 +71,7 @@ func main() {
 ```
 
 By default, `needle.New` downloads and caches the pinned Needle 3 engine
-(3.0.1) and its `needle3.cact` base weights (~35 MB) from the
+(3.1.0) and its `needle3.cact` base weights (~35 MB) from the
 [Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
 Subsequent runs use the cached files. No Python installation is required.
 
@@ -102,6 +102,11 @@ generation. When `LibraryPath` is empty, environment overrides are
 `NEEDLE2_LIB_PATH` and `NEEDLE3_LIB_PATH`; the legacy `NEEDLE_LIB_PATH` is a
 fallback for Needle 2 only. A Needle 3 library override still downloads missing
 base weights unless `WeightsPath` is supplied.
+
+Native loading detects the audio-capable ABI from its exported capability
+symbols. Trusted older Needle 2 and Needle 3 libraries retain their legacy
+completion ABI; incomplete capability sets are rejected before inference.
+Engines exposing `needle_last_error` provide detailed native failure messages.
 
 `FetchEngine` prepares the library and required base weights for offline use.
 `FetchOptions.Generation` selects the generation. Default caches are under
