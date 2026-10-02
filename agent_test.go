@@ -157,6 +157,86 @@ func TestCompleteDecodesResponseAndDefaultsTokenLimit(t *testing.T) {
 	}
 }
 
+func TestCompleteStateless(t *testing.T) {
+	t.Parallel()
+	for _, stateless := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stateful", true: "stateless"}[stateless], func(t *testing.T) {
+			fake := &fakeNative{responses: [][]byte{
+				[]byte(`{"type":"respond"}`), []byte(`{"type":"respond"}`),
+			}}
+			a, runtime := newTestAgent(t, fake, Config{Stateless: stateless})
+			reset := runtime.api.reset
+			runtime.api.reset = func() {
+				if runtime.active != a {
+					t.Fatal("reset before binding agent")
+				}
+				if runtime.mu.TryLock() {
+					runtime.mu.Unlock()
+					t.Fatal("reset outside runtime lock")
+				}
+				reset()
+			}
+			for i, query := range []string{"first", "second"} {
+				// Exercise rebinding as well as an already active agent.
+				if i == 0 {
+					runtime.active = nil
+				}
+				if _, err := a.Complete(context.Background(), query, 0); err != nil {
+					t.Fatal(err)
+				}
+				want := 0
+				if stateless {
+					want = i + 1
+				}
+				if fake.resets != want {
+					t.Fatalf("reset calls = %d, want %d", fake.resets, want)
+				}
+			}
+		})
+	}
+}
+
+func TestStatelessInvalidRequestsDoNotReset(t *testing.T) {
+	t.Parallel()
+	for _, method := range []string{"Complete", "Run"} {
+		for _, input := range []struct {
+			name, text    string
+			tokens, steps int
+			cancel        bool
+		}{
+			{name: "canceled", cancel: true},
+			{name: "NUL", text: "bad\x00input"},
+			{name: "negative tokens", tokens: -1},
+			{name: "overflow tokens", tokens: int(^uint32(0))},
+			{name: "negative steps", steps: -1},
+		} {
+			if method == "Complete" && input.steps != 0 {
+				continue
+			}
+			t.Run(method+"/"+input.name, func(t *testing.T) {
+				fake := &fakeNative{}
+				a, runtime := newTestAgent(t, fake, Config{Stateless: true})
+				runtime.active = nil
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				if input.cancel {
+					cancel()
+				}
+				var err error
+				if method == "Complete" {
+					_, err = a.Complete(ctx, input.text, input.tokens)
+				} else {
+					_, err = a.Run(ctx, input.text, input.steps, input.tokens)
+				}
+				if err == nil || fake.resets != 0 || len(fake.inputs) != 0 || len(fake.systems) != 1 || runtime.active != nil {
+					t.Fatalf("error=%v resets=%d completions=%d initializations=%d active=%v",
+						err, fake.resets, len(fake.inputs), len(fake.systems), runtime.active != nil)
+				}
+			})
+		}
+	}
+}
+
 func TestCompleteErrors(t *testing.T) {
 	t.Parallel()
 
@@ -350,6 +430,49 @@ func TestRunExecutesToolsUntilResponse(t *testing.T) {
 	}
 	if got, want := fake.inputs[1], `[{"city":"Lagos","temp_c":27}]`; got != want {
 		t.Fatalf("tool result input = %s, want %s", got, want)
+	}
+}
+
+func TestRunStatelessPreservesToolRounds(t *testing.T) {
+	t.Parallel()
+	for _, stateless := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stateful", true: "stateless"}[stateless], func(t *testing.T) {
+			fake := &fakeNative{responses: [][]byte{
+				[]byte(`{"type":"call","function_calls":[{"name":"ping","arguments":{}}]}`),
+				[]byte(`{"type":"call","function_calls":[{"name":"ping","arguments":{}}]}`),
+				[]byte(`{"type":"respond"}`),
+			}}
+			a, runtime := newTestAgent(t, fake, Config{
+				Stateless: stateless,
+				Tools: []Tool{{
+					Schema: ToolSchema{Name: "ping"},
+					Handler: func(context.Context, json.RawMessage) (any, error) {
+						return "ok", nil
+					},
+				}},
+			})
+			wantResets := 0
+			if stateless {
+				wantResets = 1
+			}
+			complete := runtime.api.complete
+			runtime.api.complete = func(input *byte, tokens int32, output []byte, capacity int32) int32 {
+				if fake.resets != wantResets {
+					t.Fatalf("reset calls before completion = %d, want %d", fake.resets, wantResets)
+				}
+				return complete(input, tokens, output, capacity)
+			}
+			response, err := a.Run(context.Background(), "ping twice", 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.Type != ResponseRespond || !reflect.DeepEqual(response.Results, []any{"ok", "ok"}) {
+				t.Fatalf("Run() response = %#v", response)
+			}
+			if !reflect.DeepEqual(fake.inputs, []string{"ping twice", `["ok"]`, `["ok"]`}) || fake.resets != wantResets {
+				t.Fatalf("inputs=%#v resets=%d, want %d", fake.inputs, fake.resets, wantResets)
+			}
+		})
 	}
 }
 

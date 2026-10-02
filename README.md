@@ -75,6 +75,20 @@ By default, `needle.New` downloads and caches the pinned Needle 3 engine
 [Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
 Subsequent runs use the cached files. No Python installation is required.
 
+## Independent requests
+
+Agents retain conversation context by default. Set `Stateless: true` for
+independent requests:
+
+```go
+agent, err := needle.New(ctx, needle.Config{Tools: tools, Stateless: true})
+```
+
+Each `Complete` or `Run` starts with a fresh conversation; `Run` retains context
+between its tool rounds. Keep the default stateful mode for manual tool loops
+that feed results back through `Complete`, and call `Reset` between independent
+queries.
+
 ## Model generations
 
 Use `Generation: 2` for the embedded Needle 2 model (engine 2.0.4):

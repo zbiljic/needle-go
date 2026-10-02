@@ -79,6 +79,10 @@ type Tool struct {
 type Config struct {
 	Tools  []Tool
 	System string
+	// Stateless resets the conversation before each Complete or Run request.
+	// Run preserves context between tool rounds. The default is stateful; use
+	// stateful mode for manual tool loops that continue through Complete.
+	Stateless bool
 	// Generation selects 2 or 3. Zero defaults to 3; WeightsPath takes precedence.
 	Generation int
 	// WeightsPath selects custom .cact weights and determines the generation.

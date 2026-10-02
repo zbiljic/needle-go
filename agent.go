@@ -16,6 +16,7 @@ type agent struct {
 	runtime       *processRuntime
 	generation    int
 	tuned         bool
+	stateless     bool
 	handlers      map[string]ToolHandler
 	system        []byte
 	tools         []byte
@@ -137,6 +138,7 @@ func prepareAgent(config Config) (*agent, error) {
 	return &agent{
 		generation:    release.generation,
 		tuned:         config.WeightsPath != "",
+		stateless:     config.Stateless,
 		handlers:      handlers,
 		system:        system,
 		tools:         tools,
@@ -172,6 +174,10 @@ func resolveLibraryPath(ctx context.Context, config Config) (string, error) {
 }
 
 func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Response, error) {
+	return a.complete(ctx, text, maxNewTokens, a.stateless)
+}
+
+func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, reset bool) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
@@ -193,6 +199,9 @@ func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Re
 	}
 	if err := a.runtime.bindLocked(a); err != nil {
 		return Response{}, err
+	}
+	if reset {
+		a.runtime.api.reset()
 	}
 	clear(a.buffer)
 	code := a.runtime.api.complete(
@@ -260,7 +269,7 @@ func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens in
 		if err != nil {
 			return Response{}, fmt.Errorf("needle: encode tool results: %w", err)
 		}
-		response, err = a.Complete(ctx, string(payload), maxNewTokens)
+		response, err = a.complete(ctx, string(payload), maxNewTokens, false)
 		if err != nil {
 			return Response{}, err
 		}
