@@ -14,6 +14,7 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 	transcribe, _ := symbol(handle, "needle_transcribe")
 	setAudio, _ := symbol(handle, "needle_set_audio")
 	lastError, _ := symbol(handle, "needle_last_error")
+	embed, _ := symbol(handle, "needle_embed")
 	audioABI := models != 0 || transcribe != 0 || setAudio != 0
 	if audioABI {
 		// These symbols were introduced together with the six-argument completion ABI.
@@ -30,7 +31,7 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 				return nil, fmt.Errorf("needle: unsupported native ABI: missing %s", capability.name)
 			}
 		}
-		if address, err := symbol(handle, "needle_embed"); err != nil || address == 0 {
+		if embed == 0 {
 			return nil, fmt.Errorf("needle: unsupported native ABI: missing needle_embed")
 		}
 	}
@@ -62,6 +63,17 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 	if audioABI {
 		api.complete = func(input *byte, tokens int32, output []byte, capacity int32) int32 {
 			return api.completeAudio(input, nil, 0, tokens, output, capacity)
+		}
+	}
+	if embed != 0 {
+		if audioABI {
+			var embedAudio func(*byte, *float32, int32, []float32, int32) int32
+			purego.RegisterFunc(&embedAudio, embed)
+			api.embed = func(input *byte, output []float32, capacity int32) int32 {
+				return embedAudio(input, nil, 0, output, capacity)
+			}
+		} else {
+			purego.RegisterFunc(&api.embed, embed)
 		}
 	}
 	return api, nil

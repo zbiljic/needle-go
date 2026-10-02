@@ -112,4 +112,4 @@ jobs:
       - name: Test generations together
         env:
           NEEDLE_TEST_NATIVE: "1"
-        run: go test -run '^TestNative(Generations|EngineDiagnostics)$' -v .
+        run: go test -run '^TestNative(Generations|EngineDiagnostics|Embeddings)$' -v .

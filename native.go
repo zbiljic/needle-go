@@ -25,6 +25,7 @@ type nativeAPI struct {
 	init          func(*byte, *byte, *byte) int32
 	complete      func(*byte, int32, []byte, int32) int32
 	completeAudio func(*byte, *float32, int32, int32, []byte, int32) int32
+	embed         func(*byte, []float32, int32) int32
 	lastError     func() string
 	reset         func()
 	load          func([]byte, uint64) int32

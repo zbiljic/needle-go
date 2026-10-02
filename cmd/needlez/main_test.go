@@ -40,6 +40,10 @@ func (a *fakeAgent) Run(context.Context, string, int, int) (needle.Response, err
 	return needle.Response{}, errors.New("unexpected Run call")
 }
 
+func (a *fakeAgent) Embed(context.Context, string) ([]float32, error) {
+	return nil, errors.New("unexpected Embed call")
+}
+
 func (a *fakeAgent) Reset(context.Context) error {
 	a.resets++
 	return a.err

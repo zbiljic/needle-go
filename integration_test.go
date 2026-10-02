@@ -2,11 +2,65 @@ package needle
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestNativeEmbeddings(t *testing.T) {
+	if os.Getenv("NEEDLE_TEST_NATIVE") != "1" {
+		t.Skip("set NEEDLE_TEST_NATIVE=1 to test native embeddings")
+	}
+	ctx := context.Background()
+	type weatherArguments struct {
+		City string `json:"city"`
+		Day  string `json:"day,omitempty" jsonschema:"enum=today,enum=tomorrow,enum=weekend"`
+	}
+	a, err := New(ctx, Config{Tools: []Tool{{Schema: SchemaFor[weatherArguments]("get_weather", "Current or forecast weather for a city.")}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.Embed(ctx, "turn on the kitchen lights")
+	if err != nil || len(first) == 0 {
+		t.Fatalf("Embed() length=%d err=%v", len(first), err)
+	}
+	second, err := a.Embed(ctx, "turn on the kitchen lights")
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("embedding is not repeatable: %v", err)
+	}
+	for _, value := range first {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			t.Fatalf("non-finite embedding value %v", value)
+		}
+	}
+	// Compare a manual tool loop with and without an embedding between turns.
+	var baseline Response
+	for _, insertEmbedding := range []bool{false, true} {
+		if err := a.Reset(ctx); err != nil {
+			t.Fatal(err)
+		}
+		initial, err := a.Complete(ctx, "what's the weather in Paris tomorrow", DefaultMaxNewTokens)
+		if err != nil || initial.Type != ResponseCall || len(initial.FunctionCalls) != 1 || initial.FunctionCalls[0].Name != "get_weather" {
+			t.Fatalf("initial tool call: response=%+v err=%v", initial, err)
+		}
+		if insertEmbedding {
+			if _, err := a.Embed(ctx, "Find Ada Lovelace in my contacts."); err != nil {
+				t.Fatal(err)
+			}
+		}
+		final, err := a.Complete(ctx, `[{"city":"Paris","tomorrow":"rain, 14C"}]`, DefaultMaxNewTokens)
+		if err != nil || final.Type != ResponseRespond || !final.Success {
+			t.Fatalf("tool-result continuation: response=%+v err=%v", final, err)
+		}
+		if insertEmbedding && (final.Type != baseline.Type || final.Reasoning != baseline.Reasoning || !reflect.DeepEqual(final.FunctionCalls, baseline.FunctionCalls) || !reflect.DeepEqual(final.Confidence, baseline.Confidence)) {
+			t.Fatalf("embedding changed continuation: got=%+v baseline=%+v", final, baseline)
+		}
+		baseline = final
+	}
+}
 
 func TestNativeEngine(t *testing.T) {
 	libraryPath := os.Getenv("NEEDLE_TEST_LIBRARY")

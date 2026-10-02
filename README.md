@@ -12,6 +12,7 @@ It provides:
 - high-level and manual completion loops
 - typed Go tool handlers
 - structured response extraction
+- Needle 3 text embeddings
 
 > This project is in early development and its API may change.
 
@@ -89,6 +90,31 @@ between its tool rounds. Keep the default stateful mode for manual tool loops
 that feed results back through `Complete`, and call `Reset` between independent
 queries.
 
+## Text embeddings
+
+Needle 3 agents expose text features as `[]float32`:
+
+```go
+vector, err := agent.Embed(ctx, "turn on the kitchen lights")
+```
+
+`Embed` does not reset the conversation, including in stateless mode. Switching
+agents still follows the conversation rules below. Needle 2 and engines without
+`needle_embed` return an error; both legacy and audio-capable Needle 3 ABIs are
+supported.
+
+The base model uses confidence-head probe features rather than a trained
+contrastive retrieval head. Evaluate similarity on your own data; this API does
+not enable automatic tool retrieval. See the [cosine-ranking example](examples/embeddings)
+and [upstream embedding notes](https://cactuscompute.com/blog/porting-needle).
+
+To check finite, repeatable vectors and a tool-result continuation with an
+embedding between turns against the real engine:
+
+```sh
+NEEDLE_TEST_NATIVE=1 go test -run '^TestNativeEmbeddings$' -v .
+```
+
 ## Model generations
 
 Use `Generation: 2` for the embedded Needle 2 model (engine 2.0.4):
@@ -160,6 +186,7 @@ Responses preserve `suppressed_calls` for inspection. `Run` executes only
 - [Structured extraction](examples/structured-extraction)
 - [Manual completion loop](examples/manual-loop)
 - [Engine downloads](examples/fetch-engine)
+- [Text similarity](examples/embeddings)
 
 ## License
 

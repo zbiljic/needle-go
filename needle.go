@@ -86,7 +86,8 @@ type Config struct {
 	// Generation selects 2 or 3. Zero defaults to 3; WeightsPath takes precedence.
 	Generation int
 	// WeightsPath selects custom .cact weights and determines the generation.
-	// Custom weights disable calibrated confidence. The header check does not
+	// Custom Needle 3 weights retain confidence when their archive carries a
+	// recognized confidence head; other custom weights report nil. The header check does not
 	// validate the remaining bytes or engine revision compatibility; those are
 	// left to the native loader.
 	WeightsPath   string
@@ -105,6 +106,9 @@ type Config struct {
 type Agent interface {
 	// Complete performs raw inference without applying response validation.
 	Complete(ctx context.Context, text string, maxNewTokens int) (Response, error)
+	// Embed returns text features from Needle 3 without resetting the conversation.
+	// Engines without embedding support return an error.
+	Embed(ctx context.Context, text string) ([]float32, error)
 	// Run uses ValidateResponse to reject an entire flagged turn before executing
 	// any tool calls, without retrying. It returns the raw flagged response and
 	// results from earlier completed rounds.

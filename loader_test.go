@@ -18,6 +18,22 @@ func TestRegisterNativeABI(t *testing.T) {
 			var gotInput string
 			var gotTokens, gotCapacity, gotSamples int32
 			var gotPCM *float32
+			embedCalls := 0
+			embed := func(input *byte, output *float32, capacity int32) int32 {
+				embedCalls++
+				if readCString(input) != "hello" {
+					t.Error("wrong embedding input")
+				}
+				if output != nil {
+					if capacity != 2 {
+						t.Errorf("embedding capacity = %d", capacity)
+					}
+					copy(unsafe.Slice(output, int(capacity)), []float32{0.25, -0.75})
+				} else if capacity != 0 {
+					t.Error("size query has nonzero capacity")
+				}
+				return 2
+			}
 			complete := func(input *byte, tokens int32, output *byte, capacity int32) int32 {
 				calls++
 				gotInput, gotTokens, gotCapacity = readCString(input), tokens, capacity
@@ -29,15 +45,22 @@ func TestRegisterNativeABI(t *testing.T) {
 				"needle_complete": purego.NewCallback(complete),
 				"needle_reset":    purego.NewCallback(func() {}),
 				"needle_load":     purego.NewCallback(func(*byte, uint64) int32 { return 0 }),
+				"needle_embed":    purego.NewCallback(embed),
 			}
 			if modern {
 				symbols["needle_complete"] = purego.NewCallback(func(input *byte, pcm *float32, samples, tokens int32, output *byte, capacity int32) int32 {
 					gotPCM, gotSamples = pcm, samples
 					return complete(input, tokens, output, capacity)
 				})
-				for _, name := range []string{"needle_models", "needle_transcribe", "needle_set_audio", "needle_embed"} {
+				for _, name := range []string{"needle_models", "needle_transcribe", "needle_set_audio"} {
 					symbols[name] = 1 // Capabilities are probed, never called during registration.
 				}
+				symbols["needle_embed"] = purego.NewCallback(func(input *byte, pcm *float32, samples int32, output *float32, capacity int32) int32 {
+					if pcm != nil || samples != 0 {
+						t.Error("text embedding received audio arguments")
+					}
+					return embed(input, output, capacity)
+				})
 				diagnostic := []byte("native detail\x00")
 				symbols["needle_last_error"] = purego.NewCallback(func() *byte { return &diagnostic[0] })
 			}
@@ -65,12 +88,25 @@ func TestRegisterNativeABI(t *testing.T) {
 			if modern && api.lastError() != "native detail" {
 				t.Fatal("native diagnostic was not copied")
 			}
+			vector := make([]float32, 2)
+			if api.embed(&input[0], nil, 0) != 2 || api.embed(&input[0], vector, 2) != 2 || embedCalls != 2 || vector[0] != 0.25 || vector[1] != -0.75 {
+				t.Fatalf("embedding ABI: calls=%d output=%v", embedCalls, vector)
+			}
 			names := make([]string, 0, len(symbols))
 			for name := range symbols {
 				names = append(names, name)
 			}
 			for _, name := range names {
 				address := symbols[name]
+				if name == "needle_embed" && !modern {
+					delete(symbols, name)
+					legacy, err := registerNative(42, resolve)
+					if err != nil || legacy.embed != nil {
+						t.Fatalf("legacy engine without embeddings: api=%+v err=%v", legacy, err)
+					}
+					symbols[name] = address
+					continue
+				}
 				symbols[name] = 0
 				if _, err := registerNative(42, resolve); err == nil || !strings.Contains(err.Error(), name) {
 					t.Fatalf("null %s: %v", name, err)
