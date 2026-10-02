@@ -76,6 +76,19 @@ By default, `needle.New` downloads and caches the pinned Needle 3 engine
 [Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
 Subsequent runs use the cached files. No Python installation is required.
 
+## Tool triggers
+
+Opt into regex routing by assigning triggers after `NewTool`, using the weather
+tool above:
+
+```go
+weather.Schema.Triggers = []string{`\bweather\b`, `\bforecast\b`}
+```
+
+The native engine interprets the patterns and matches them case-insensitively.
+Matching triggers can bypass the engine's confidence floor; application confidence
+policies and response validation still apply.
+
 ## Independent requests
 
 Agents retain conversation context by default. Set `Stateless: true` for

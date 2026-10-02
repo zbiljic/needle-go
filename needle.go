@@ -62,6 +62,8 @@ type ToolSchema struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	Parameters  map[string]any `json:"parameters"`
+	// Triggers opt into native regex routing and can bypass the confidence floor.
+	Triggers []string `json:"triggers,omitempty"`
 }
 
 // ToolHandler executes a model-selected function call.

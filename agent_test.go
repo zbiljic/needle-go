@@ -109,6 +109,46 @@ func TestPrepareAgentConfiguresNativeSession(t *testing.T) {
 	}
 }
 
+func TestPrepareAgentSerializesToolTriggers(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		triggers []string
+	}{
+		{name: "unset"},
+		{name: "empty", triggers: []string{}},
+		{name: "patterns", triggers: []string{`\bweather\b`, `\bforecast\b`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake := &fakeNative{}
+			tool := NewTool[typedToolArguments, typedToolResult]("weather", "Get the weather.", nil)
+			tool.Schema.Triggers = test.triggers
+			newTestAgent(t, fake, Config{Tools: []Tool{tool}})
+			var schemas []map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(fake.tools[0]), &schemas); err != nil {
+				t.Fatal(err)
+			}
+			if len(schemas) != 1 {
+				t.Fatalf("tools = %s, want one tool", fake.tools[0])
+			}
+			raw, exists := schemas[0]["triggers"]
+			if len(test.triggers) == 0 {
+				if exists {
+					t.Fatalf("unset triggers were serialized: %s", fake.tools[0])
+				}
+				return
+			}
+			var triggers []string
+			if err := json.Unmarshal(raw, &triggers); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(triggers, test.triggers) {
+				t.Fatalf("triggers = %#v, want %#v", triggers, test.triggers)
+			}
+		})
+	}
+}
+
 func TestPrepareAgentValidatesConfig(t *testing.T) {
 	t.Parallel()
 
