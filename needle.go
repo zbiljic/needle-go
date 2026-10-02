@@ -87,9 +87,9 @@ type Config struct {
 	Generation int
 	// WeightsPath selects custom .cact weights and determines the generation.
 	// Custom Needle 3 weights retain confidence when their archive carries a
-	// recognized confidence head; other custom weights report nil. The header check does not
-	// validate the remaining bytes or engine revision compatibility; those are
-	// left to the native loader.
+	// recognized confidence head; other custom weights report nil. The header
+	// check does not validate the remaining bytes or engine revision compatibility;
+	// those are left to the native loader.
 	WeightsPath   string
 	ToolIndexPath string
 	BufferSize    int

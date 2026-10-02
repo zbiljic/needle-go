@@ -128,9 +128,12 @@ agent, err := needle.New(ctx, needle.Config{
 
 `Generation: 0` and `Generation: 3` select Needle 3. A custom `WeightsPath`
 selects the compatible engine from the `.cact` header, taking precedence over
-`Generation`. Supplying `WeightsPath` makes `Confidence == nil`, even if the
-file contains base weights. Automatically loaded base weights retain the
-engine's confidence scores.
+`Generation`. Custom Needle 3 archives retain the engine's confidence scores
+when their metadata carries a recognized confidence head, including platform
+fine-tunes and the published base archive supplied through `WeightsPath`.
+Custom Needle 2 weights, local fine-tunes without a confidence head, and unknown
+or malformed head metadata report `Confidence == nil`. Automatically loaded
+base weights retain the engine's confidence scores.
 
 Both generations can run in the same process, with separate native runtimes.
 Within one generation, switching agents reinitializes the active conversation.

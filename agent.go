@@ -16,6 +16,7 @@ type agent struct {
 	runtime       *processRuntime
 	generation    int
 	tuned         bool
+	calibrated    bool
 	stateless     bool
 	handlers      map[string]ToolHandler
 	system        []byte
@@ -138,6 +139,7 @@ func prepareAgent(config Config) (*agent, error) {
 	return &agent{
 		generation:    release.generation,
 		tuned:         config.WeightsPath != "",
+		calibrated:    config.WeightsPath == "",
 		stateless:     config.Stateless,
 		handlers:      handlers,
 		system:        system,
@@ -229,7 +231,7 @@ func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, res
 	if response.Type == "" {
 		return Response{}, errors.New("needle: response type is empty")
 	}
-	if a.tuned {
+	if !a.calibrated {
 		response.Confidence = nil
 	}
 	return response, nil

@@ -145,6 +145,7 @@ func (r *processRuntime) bindLocked(a *agent) error {
 		r.activeWeights = a.weightsPath
 		r.active = nil
 	}
+	a.calibrated = !a.tuned || (a.generation == 3 && confidenceHeadPresent(r.activeBlob))
 	if code := r.api.init(bytePointer(a.system), bytePointer(a.tools), bytePointer(a.toolIndexPath)); code < 0 {
 		r.active = nil
 		return r.api.failure("initialize", code, "")

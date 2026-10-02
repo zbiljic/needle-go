@@ -921,7 +921,7 @@ func TestRejectWeightsGeneration(t *testing.T) {
 	})
 }
 
-func TestGenerationSelectionAndBaseConfidence(t *testing.T) {
+func TestGenerationSelectionAndUncalibratedCustomWeights(t *testing.T) {
 	t.Parallel()
 	for _, generation := range []int{2, 3} {
 		path := t.TempDir() + "/weights.cact"

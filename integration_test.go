@@ -128,7 +128,7 @@ func TestNativeGenerations(t *testing.T) {
 	}
 	for _, a := range []Agent{custom, agents[1]} {
 		r, err := a.Complete(ctx, "hello", DefaultMaxNewTokens)
-		if err != nil || !r.Success || (r.Confidence == nil) != (a == custom) {
+		if err != nil || !r.Success || r.Confidence == nil {
 			t.Fatalf("custom=%v response=%+v err=%v", a == custom, r, err)
 		}
 	}
