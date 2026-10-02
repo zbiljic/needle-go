@@ -2,33 +2,95 @@ package needle
 
 import (
 	"encoding/binary"
+	"math"
 	"slices"
 )
 
-// confidenceHeadPresent inspects only the documented v3 head metadata. The
-// native loader validates the model itself; unknown head layouts fail closed.
-func confidenceHeadPresent(blob []byte) bool {
-	const headerSize, recordSize = 49 * 4, 44
+const (
+	modelText   = 1
+	modelSpeech = 2
+)
+
+func manifestPosition(blob []byte) (directory, count, index uint64, ok bool) {
+	const headerSize, recordSize = 196, 44
 	if len(blob) < headerSize || binary.LittleEndian.Uint32(blob) != needle3WeightsTag {
-		return false
+		return
 	}
-	field := func(index int) uint64 { return uint64(binary.LittleEndian.Uint32(blob[index*4:])) }
-	count, codebook, width, layers, sites := field(1), field(2), field(7), field(10), field(31)
-	directory := headerSize + codebook*4
-	if directory > uint64(len(blob)) || count > (uint64(len(blob))-directory)/recordSize || width == 0 || layers == 0 || sites > 16 {
-		return false
+	field := func(i int) uint64 { return uint64(binary.LittleEndian.Uint32(blob[i*4:])) }
+	count, directory = field(1), headerSize+field(2)*4
+	if directory > uint64(len(blob)) || count > (uint64(len(blob))-directory)/recordSize || field(7) == 0 || field(10) == 0 || field(31) > 16 {
+		return
 	}
-	dataStart := directory + count*recordSize
-	// Embedding, layer tensors, 9 mHC tensors, 2 Hadamard permutations,
-	// 4 tensors per engram site, then final_norm precede the manifest.
 	perLayer := uint64(24)
 	if field(19) != 0 {
 		perLayer += 3
 	}
-	index := 13 + layers*perLayer + sites*4
-	if index+2 > count {
+	// Embedding, blocks, mHC, permutations, engrams and final_norm precede
+	// either the probe-head manifest or the speech manifest.
+	index = 13 + field(10)*perLayer + field(31)*4
+	ok = index < count
+	return
+}
+
+// weightsKind distinguishes text and speech before needle_load can replace
+// either process-global model. The shared format tag does not identify the kind.
+func weightsKind(blob []byte) int {
+	const recordSize = 44
+	directory, count, index, ok := manifestPosition(blob)
+	if !ok {
+		return 0
+	}
+	record := blob[directory+index*recordSize : directory+(index+1)*recordSize]
+	if binary.LittleEndian.Uint16(record[2:]) != 0 || binary.LittleEndian.Uint32(record[36:]) != 0 || binary.LittleEndian.Uint32(record[40:]) != 0 {
+		return 0
+	}
+	offset, size := binary.LittleEndian.Uint64(record[20:]), binary.LittleEndian.Uint64(record[28:])
+	if offset < directory+count*recordSize || offset > uint64(len(blob)) || size == 0 || size > uint64(len(blob))-offset {
+		return 0
+	}
+	shape := binary.LittleEndian.Uint32(record[4:])
+	for i := 1; i < 4; i++ {
+		if binary.LittleEndian.Uint32(record[4+i*4:]) != 0 {
+			return 0
+		}
+	}
+	data := blob[offset : offset+size]
+	if record[0] == 4 && record[1] == 0 && shape == 0 && index+1 == count {
+		return modelText // Text archive without probe heads.
+	}
+	if record[0] == 1 && record[1] == 1 && shape > 0 && shape <= 3 && size == uint64(shape)*2 {
+		previous := uint16(0)
+		for i := range shape {
+			code := binary.LittleEndian.Uint16(data[i*2:])
+			if code <= previous || (code != 0x3c00 && code != 0x4000 && code != 0x4200) {
+				return 0
+			}
+			previous = code
+		}
+		return modelText
+	}
+	// ponytail: recognize the published version-1 audio manifest only; extend
+	// this classifier when upstream publishes another speech archive layout.
+	if record[0] == 2 && record[1] == 1 && shape == 13 && size == 52 && index+1 < count {
+		value := func(i int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:])) }
+		if value(0) == 3246 && value(1) == 1 && value(9) == SpeechSampleRate {
+			return modelSpeech
+		}
+	}
+	return 0
+}
+
+// confidenceHeadPresent inspects only the documented v3 head metadata. The
+// native loader validates the model itself; unknown head layouts fail closed.
+func confidenceHeadPresent(blob []byte) bool {
+	const recordSize = 44
+	directory, count, index, ok := manifestPosition(blob)
+	if !ok || index+2 > count {
 		return false
 	}
+	field := func(index int) uint64 { return uint64(binary.LittleEndian.Uint32(blob[index*4:])) }
+	width, layers := field(7), field(10)
+	dataStart := directory + count*recordSize
 	previousEnd := dataStart
 	read := func(index uint64) (cactTensor, bool) {
 		if index >= count {

@@ -212,20 +212,17 @@ func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, res
 		a.buffer,
 		int32(len(a.buffer)),
 	)
-	if code < 0 {
-		end := bytes.IndexByte(a.buffer, 0)
-		if end < 0 {
-			end = len(a.buffer)
-		}
-		return Response{}, a.runtime.api.failure("complete", code, string(a.buffer[:end]))
-	}
+	return a.decodeResponse(code)
+}
 
-	end := bytes.IndexByte(a.buffer, 0)
-	if end < 0 {
-		return Response{}, errors.New("needle: engine response exceeds buffer")
+// decodeResponse is called with the runtime mutex held.
+func (a *agent) decodeResponse(code int32) (Response, error) {
+	data, err := nativeOutput(a.runtime.api, "complete", code, a.buffer)
+	if err != nil {
+		return Response{}, err
 	}
 	var response Response
-	if err := json.Unmarshal(a.buffer[:end], &response); err != nil {
+	if err := json.Unmarshal(data, &response); err != nil {
 		return Response{}, fmt.Errorf("needle: decode response: %w", err)
 	}
 	if response.Type == "" {
@@ -235,6 +232,23 @@ func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, res
 		response.Confidence = nil
 	}
 	return response, nil
+}
+
+// nativeOutput reads diagnostics before any other native call can overwrite them.
+// The caller must hold the runtime mutex.
+func nativeOutput(api *nativeAPI, operation string, code int32, buffer []byte) ([]byte, error) {
+	if code < 0 {
+		end := bytes.IndexByte(buffer, 0)
+		if end < 0 {
+			end = len(buffer)
+		}
+		return nil, api.failure(operation, code, string(buffer[:end]))
+	}
+	end := bytes.IndexByte(buffer, 0)
+	if end < 0 {
+		return nil, errors.New("needle: engine response exceeds buffer")
+	}
+	return buffer[:end], nil
 }
 
 // Run completes a query, rejects engine validation warnings, and executes

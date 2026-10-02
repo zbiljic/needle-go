@@ -167,6 +167,12 @@ var baseWeights = engineArtifact{
 	checksum:    "c9d915eca282ed42d1a09b143b592adb4cc6744ffe2d294adf5cfc5548170c38",
 }
 
+var speechWeights = engineArtifact{
+	filename:    "whistle.cact",
+	libraryName: "whistle.cact",
+	checksum:    "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb",
+}
+
 type engineRelease struct {
 	generation              int
 	version, repo, revision string
@@ -301,6 +307,30 @@ func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// FetchWhistle caches the Needle 3 engine and Whistle speech weights for offline
+// use. It returns the library path and does not download text weights.
+// Generation must be zero or 3; Platform and CacheDir follow FetchEngine.
+func FetchWhistle(ctx context.Context, options FetchOptions) (string, error) {
+	if options.Generation != 0 && options.Generation != 3 {
+		return "", errors.New("needle: Whistle requires generation 3")
+	}
+	path, err := fetchEngineLibrary(ctx, options)
+	if err != nil {
+		return "", err
+	}
+	if _, err := fetchSpeechWeights(ctx, options); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func fetchSpeechWeights(ctx context.Context, options FetchOptions) (string, error) {
+	release, _ := releaseFor(3)
+	release.repo = "Cactus-Compute/whistle"
+	release.revision = "b358ddadd89b7a713b5aa131f23032d3cca1b251"
+	return fetchWithOptions(ctx, options, release, speechWeights)
 }
 
 func fetchEngineLibrary(ctx context.Context, options FetchOptions) (string, error) {

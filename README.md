@@ -13,6 +13,7 @@ It provides:
 - typed Go tool handlers
 - structured response extraction
 - Needle 3 text embeddings
+- opt-in Whistle speech transcription and audio tool calling
 
 > This project is in early development and its API may change.
 
@@ -128,6 +129,15 @@ embedding between turns against the real engine:
 NEEDLE_TEST_NATIVE=1 go test -run '^TestNativeEmbeddings$' -v .
 ```
 
+## Speech
+
+`NewWhistle` adds optional speech transcription and audio tool calling with
+Needle 3. It accepts 16 kHz mono `[]float32` PCM, up to 30 seconds. Speech weights
+are downloaded only when requested.
+
+See the [speech guide](docs/speech.md) for the API, supported languages and offline
+setup, or try the [PCM example](examples/transcribe).
+
 ## Model generations
 
 Use `Generation: 2` for the embedded Needle 2 model (engine 2.0.4):
@@ -144,8 +154,9 @@ selects the compatible engine from the `.cact` header, taking precedence over
 `Generation`. Custom Needle 3 archives retain the engine's confidence scores
 when their metadata carries a recognized confidence head, including platform
 fine-tunes and the published base archive supplied through `WeightsPath`.
-Custom Needle 2 weights, local fine-tunes without a confidence head, and unknown
-or malformed head metadata report `Confidence == nil`. Automatically loaded
+Custom Needle 2 weights and recognized text archives without a valid confidence
+head report `Confidence == nil`. Unrecognized
+model-kind metadata is rejected before loading. Automatically loaded
 base weights retain the engine's confidence scores.
 
 Both generations can run in the same process, with separate native runtimes.
@@ -203,6 +214,7 @@ Responses preserve `suppressed_calls` for inspection. `Run` executes only
 - [Manual completion loop](examples/manual-loop)
 - [Engine downloads](examples/fetch-engine)
 - [Text similarity](examples/embeddings)
+- [Speech transcription from PCM](examples/transcribe)
 
 ## License
 

@@ -47,14 +47,19 @@ type Response struct {
 	ErrorCode     *string        `json:"error_code"`
 	FunctionCalls []FunctionCall `json:"function_calls"`
 	// SuppressedCalls are withheld by the engine and must not be executed automatically.
-	SuppressedCalls []FunctionCall `json:"suppressed_calls,omitempty"`
-	Reasoning       string         `json:"reasoning"`
-	Confidence      *float64       `json:"confidence"`
-	PrefillTPS      float64        `json:"prefill_tps"`
-	DecodeTPS       float64        `json:"decode_tps"`
-	PeakRAMMB       float64        `json:"peak_ram_mb"`
-	Results         []any          `json:"results,omitempty"`
-	Validation      *Validation    `json:"validation,omitempty"`
+	SuppressedCalls []FunctionCall  `json:"suppressed_calls,omitempty"`
+	Reasoning       string          `json:"reasoning"`
+	Confidence      *float64        `json:"confidence"`
+	PrefillTPS      float64         `json:"prefill_tps"`
+	DecodeTPS       float64         `json:"decode_tps"`
+	PeakRAMMB       float64         `json:"peak_ram_mb"`
+	Results         []any           `json:"results,omitempty"`
+	Validation      *Validation     `json:"validation,omitempty"`
+	AudioText       *string         `json:"audio_text,omitempty"`
+	AudioLanguage   *string         `json:"audio_language,omitempty"`
+	AudioWords      []WordTimestamp `json:"audio_words,omitempty"`
+	AudioTTFTMS     *float64        `json:"audio_ttft_ms,omitempty"`
+	AudioDecodeTPS  *float64        `json:"audio_decode_tps,omitempty"`
 }
 
 // ToolSchema describes a function that the model may call.
@@ -90,8 +95,8 @@ type Config struct {
 	// WeightsPath selects custom .cact weights and determines the generation.
 	// Custom Needle 3 weights retain confidence when their archive carries a
 	// recognized confidence head; other custom weights report nil. The header
-	// check does not validate the remaining bytes or engine revision compatibility;
-	// those are left to the native loader.
+	// and model-kind metadata are checked before loading. Remaining model bytes
+	// and engine revision compatibility are validated by the native loader.
 	WeightsPath   string
 	ToolIndexPath string
 	BufferSize    int

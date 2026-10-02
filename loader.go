@@ -61,6 +61,8 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 		purego.RegisterFunc(binding.target, address)
 	}
 	if audioABI {
+		purego.RegisterFunc(&api.transcribe, transcribe)
+		purego.RegisterFunc(&api.setAudio, setAudio)
 		api.complete = func(input *byte, tokens int32, output []byte, capacity int32) int32 {
 			return api.completeAudio(input, nil, 0, tokens, output, capacity)
 		}

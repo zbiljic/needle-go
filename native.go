@@ -25,6 +25,8 @@ type nativeAPI struct {
 	init          func(*byte, *byte, *byte) int32
 	complete      func(*byte, int32, []byte, int32) int32
 	completeAudio func(*byte, *float32, int32, int32, []byte, int32) int32
+	transcribe    func(*float32, int32, *byte, *byte, int32, []byte, int32) int32
+	setAudio      func(*byte, *byte, int32)
 	embed         func(*byte, []float32, int32) int32
 	lastError     func() string
 	reset         func()
@@ -54,6 +56,8 @@ type processRuntime struct {
 	active        *agent
 	activeWeights string
 	activeBlob    []byte
+	speechWeights string
+	speechBlob    []byte
 }
 
 var runtimes = map[int]*processRuntime{2: {}, 3: {}}
@@ -137,6 +141,9 @@ func (r *processRuntime) bindLocked(a *agent) error {
 			return fmt.Errorf(
 				"needle: weights generation changed: got %d, want %d", generation, a.generation,
 			)
+		}
+		if generation == 3 && weightsKind(blob) != modelText {
+			return errors.New("needle: weights are not a recognized text model")
 		}
 		if code := r.api.load(blob, uint64(len(blob))); code < 0 {
 			return r.api.failure("load weights", code, "")

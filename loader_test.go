@@ -18,6 +18,7 @@ func TestRegisterNativeABI(t *testing.T) {
 			var gotInput string
 			var gotTokens, gotCapacity, gotSamples int32
 			var gotPCM *float32
+			transcriptions, audioSettings := 0, 0
 			embedCalls := 0
 			embed := func(input *byte, output *float32, capacity int32) int32 {
 				embedCalls++
@@ -52,9 +53,24 @@ func TestRegisterNativeABI(t *testing.T) {
 					gotPCM, gotSamples = pcm, samples
 					return complete(input, tokens, output, capacity)
 				})
-				for _, name := range []string{"needle_models", "needle_transcribe", "needle_set_audio"} {
-					symbols[name] = 1 // Capabilities are probed, never called during registration.
-				}
+				symbols["needle_models"] = 1 // Probed, never called during registration.
+				symbols["needle_transcribe"] = purego.NewCallback(func(pcm *float32, samples int32, language, keywords *byte, timestamps int32, output *byte, capacity int32) int32 {
+					transcriptions++
+					if pcm == nil || samples != 2 || *pcm != 0.25 || readCString(language) != "en" || readCString(keywords) != "Paris\nAda" || timestamps != 1 || capacity != 32 {
+						t.Error("incorrect seven-argument transcription ABI")
+					}
+					copy(unsafe.Slice(output, capacity), "speech\x00")
+					return 17
+				})
+				symbols["needle_set_audio"] = purego.NewCallback(func(language, keywords *byte, timestamps int32) {
+					audioSettings++
+					if audioSettings == 1 && (readCString(language) != "en" || readCString(keywords) != "Paris\nAda" || timestamps != 1) {
+						t.Error("incorrect three-argument audio options ABI")
+					}
+					if audioSettings == 2 && (language != nil || keywords != nil || timestamps != 0) {
+						t.Error("audio options were not cleared")
+					}
+				})
 				symbols["needle_embed"] = purego.NewCallback(func(input *byte, pcm *float32, samples int32, output *float32, capacity int32) int32 {
 					if pcm != nil || samples != 0 {
 						t.Error("text embedding received audio arguments")
@@ -87,6 +103,19 @@ func TestRegisterNativeABI(t *testing.T) {
 			}
 			if modern && api.lastError() != "native detail" {
 				t.Fatal("native diagnostic was not copied")
+			}
+			if modern {
+				language, _ := cString("language", "en", false)
+				keywords, _ := cString("keywords", "Paris\nAda", false)
+				pcm := []float32{0.25, -0.5}
+				api.setAudio(&language[0], &keywords[0], 1)
+				if code := api.transcribe(&pcm[0], 2, &language[0], &keywords[0], 1, output, 32); code != 17 || string(output[:6]) != "speech" {
+					t.Fatalf("transcription ABI: code=%d output=%q", code, output)
+				}
+				api.setAudio(nil, nil, 0)
+				if transcriptions != 1 || audioSettings != 2 {
+					t.Fatalf("transcriptions=%d audio settings=%d", transcriptions, audioSettings)
+				}
 			}
 			vector := make([]float32, 2)
 			if api.embed(&input[0], nil, 0) != 2 || api.embed(&input[0], vector, 2) != 2 || embedCalls != 2 || vector[0] != 0.25 || vector[1] != -0.75 {

@@ -420,7 +420,7 @@ func TestNativeLastErrorDiagnostics(t *testing.T) {
 					err = a.Reset(context.Background())
 				case "load weights":
 					a.weightsPath = filepath.Join(t.TempDir(), "weights.cact")
-					if err := os.WriteFile(a.weightsPath, []byte{0x84, 0x2a, 0xe1, 0x05}, 0o600); err != nil {
+					if err := os.WriteFile(a.weightsPath, testHeadArchive(nil, false), 0o600); err != nil {
 						t.Fatal(err)
 					}
 					fake.loadCode = -7
@@ -966,6 +966,9 @@ func TestGenerationSelectionAndUncalibratedCustomWeights(t *testing.T) {
 	for _, generation := range []int{2, 3} {
 		path := t.TempDir() + "/weights.cact"
 		blob := []byte{byte(0x81 + generation), 0x2a, 0xe1, 0x05, 1}
+		if generation == 3 {
+			blob = testHeadArchive(nil, false)
+		}
 		if err := os.WriteFile(path, blob, 0o600); err != nil {
 			t.Fatal(err)
 		}
