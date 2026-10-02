@@ -3,7 +3,7 @@ module github.com/zbiljic/needle-go
 go 1.25.0
 
 require (
-	github.com/ebitengine/purego v0.10.2
+	github.com/ebitengine/purego v0.11.1
 	github.com/invopop/jsonschema v0.14.0
 )
 
