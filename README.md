@@ -192,6 +192,14 @@ the same cache directory at runtime. Markers contain the downloaded artifact has
 and installed file hash; cached downloads verify both. `CachedEngine` checks only
 for the library and trusts the caller's file.
 
+## Errors
+
+Errors wrap sentinels for `errors.Is`: `ErrValidation` (also wrapped by `Run`),
+`ErrUnsupportedGeneration`, `ErrEmbeddingUnsupported`, `ErrSpeechUnsupported`,
+`ErrUnsupportedABI`, `ErrUnsupportedPlatform`, `ErrEngineNotFound` and
+`ErrClosed`. A failed engine call is a `*NativeError` with the operation, the
+native code and any engine diagnostic, for `errors.As`.
+
 ## Native engine diagnostics
 
 The optional `needlez` command can fetch the engine and verify that it loads:

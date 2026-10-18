@@ -16,10 +16,6 @@ const (
 	needle3WeightsTag = 0x05e12a84
 )
 
-// ErrUnsupportedPlatform indicates that no PureGo shared-library backend is
-// available for the requested target.
-var ErrUnsupportedPlatform = errors.New("needle: unsupported platform")
-
 type nativeAPI struct {
 	handle        uintptr
 	init          func(*byte, *byte, *byte) int32
@@ -42,10 +38,7 @@ func (api *nativeAPI) failure(operation string, code int32, fallback string) err
 		}
 	}
 	detail := strings.TrimSpace(strings.ToValidUTF8(fallback, "�"))
-	if detail != "" {
-		return fmt.Errorf("needle: %s failed with code %d: %s", operation, code, detail)
-	}
-	return fmt.Errorf("needle: %s failed with code %d", operation, code)
+	return &NativeError{Operation: operation, Code: code, Detail: detail}
 }
 
 type processRuntime struct {

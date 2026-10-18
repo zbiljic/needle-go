@@ -2,7 +2,6 @@ package needle
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
@@ -16,7 +15,7 @@ func (a *Agent) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, err
 	}
 	if a.generation < 3 {
-		return nil, errors.New("needle: embeddings require Needle 3")
+		return nil, fmt.Errorf("%w: embeddings require Needle 3", ErrEmbeddingUnsupported)
 	}
 	input, err := cString("input", text, false)
 	if err != nil {
@@ -33,7 +32,7 @@ func (a *Agent) Embed(ctx context.Context, text string) ([]float32, error) {
 	}
 	api := a.runtime.api
 	if api.embed == nil {
-		return nil, errors.New("needle: engine does not support embeddings")
+		return nil, fmt.Errorf("%w: engine does not support embeddings", ErrEmbeddingUnsupported)
 	}
 	size := api.embed(bytePointer(input), nil, 0)
 	if size < 0 {

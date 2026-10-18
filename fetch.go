@@ -218,7 +218,7 @@ func releaseFor(generation int) (engineRelease, error) {
 	case 0, 3:
 		return releaseV3, nil
 	default:
-		return engineRelease{}, fmt.Errorf("needle: unsupported generation %d; want 2 or 3", generation)
+		return engineRelease{}, fmt.Errorf("%w %d; want 2 or 3", ErrUnsupportedGeneration, generation)
 	}
 }
 
@@ -229,9 +229,6 @@ func EngineVersionFor(generation int) (string, error) {
 }
 
 var fetchMu sync.Mutex
-
-// ErrEngineNotFound indicates that a cached engine library is unavailable.
-var ErrEngineNotFound = errors.New("needle: engine library not found")
 
 // SupportedPlatforms returns the desktop engine builds known to this version.
 func SupportedPlatforms() []Platform {
@@ -332,7 +329,7 @@ func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
 // Generation must be zero or 3; Platform and CacheDir follow FetchEngine.
 func FetchWhistle(ctx context.Context, options FetchOptions) (string, error) {
 	if options.Generation != 0 && options.Generation != 3 {
-		return "", errors.New("needle: Whistle requires generation 3")
+		return "", fmt.Errorf("%w: Whistle requires generation 3", ErrUnsupportedGeneration)
 	}
 	path, err := fetchEngineLibrary(ctx, options)
 	if err != nil {

@@ -149,3 +149,16 @@ func TestRegisterNativeABI(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterNativeRejectsPartialABI(t *testing.T) {
+	t.Parallel()
+	resolve := func(_ uintptr, name string) (uintptr, error) {
+		if name == "needle_models" {
+			return 1, nil
+		}
+		return 0, nil
+	}
+	if _, err := registerNative(0, resolve); !errors.Is(err, ErrUnsupportedABI) {
+		t.Fatalf("registerNative() error = %v", err)
+	}
+}

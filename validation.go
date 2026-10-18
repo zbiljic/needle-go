@@ -1,7 +1,6 @@
 package needle
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -15,10 +14,10 @@ func ValidateResponse(response Response) error {
 		return nil
 	}
 	if response.Validation.Negation {
-		return errors.New("needle: response validation: negation detected")
+		return fmt.Errorf("%w: negation detected", ErrValidation)
 	}
 	if len(response.Validation.Ungrounded) > 0 {
-		return fmt.Errorf("needle: response validation: ungrounded fields: %s", strings.Join(response.Validation.Ungrounded, ", "))
+		return fmt.Errorf("%w: ungrounded fields: %s", ErrValidation, strings.Join(response.Validation.Ungrounded, ", "))
 	}
 	return nil
 }

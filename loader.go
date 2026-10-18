@@ -28,11 +28,11 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 			{"needle_last_error", lastError},
 		} {
 			if capability.address == 0 {
-				return nil, fmt.Errorf("needle: unsupported native ABI: missing %s", capability.name)
+				return nil, fmt.Errorf("%w: missing %s", ErrUnsupportedABI, capability.name)
 			}
 		}
 		if embed == 0 {
-			return nil, fmt.Errorf("needle: unsupported native ABI: missing needle_embed")
+			return nil, fmt.Errorf("%w: missing needle_embed", ErrUnsupportedABI)
 		}
 	}
 	if lastError != 0 {

@@ -112,7 +112,7 @@ func (w *Whistle) bindLocked() error {
 	}
 	api := w.runtime.api
 	if api == nil || api.transcribe == nil || api.setAudio == nil || api.completeAudio == nil {
-		return errors.New("needle: engine does not support speech; use Needle 3.1 or newer")
+		return fmt.Errorf("%w: engine does not support speech; use Needle 3.1 or newer", ErrSpeechUnsupported)
 	}
 	if w.runtime.speechWeights == w.weightsPath {
 		return nil
