@@ -73,7 +73,7 @@ func main() {
 ```
 
 By default, `needle.New` downloads and caches the pinned Needle 3 engine
-(3.1.0) and its `needle3.cact` base weights (~35 MB) from the
+(3.3.1) and its `needle3.cact` base weights (~35 MB) from the
 [Needle 3 model repository](https://huggingface.co/Cactus-Compute/needle3).
 Subsequent runs use the cached files. No Python installation is required.
 

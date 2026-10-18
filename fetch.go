@@ -19,12 +19,12 @@ import (
 
 const (
 	// EngineVersion is the default (Needle 3) native engine version.
-	EngineVersion = "3.1.0"
+	EngineVersion = "3.3.1"
 	// EnvLibraryPath overrides Needle 2 engine discovery for legacy clients.
 	EnvLibraryPath = "NEEDLE_LIB_PATH"
 
 	huggingFaceRepo     = "Cactus-Compute/needle3"
-	huggingFaceRevision = "c7c415a3d1b3d929014bc6e866d51ebb971f7089"
+	huggingFaceRevision = "93e88ede867e4311c39151285e74df513e4b835b"
 	maxArtifactSize     = 64 << 20
 )
 
@@ -112,50 +112,50 @@ var artifactsV2 = map[Platform]engineArtifact{
 
 var artifacts = map[Platform]engineArtifact{
 	PlatformDarwinARM64: {
-		filename:    "cactus_needle-3.1.0-py3-none-macosx_11_0_arm64.whl",
-		checksum:    "ad1cba80ede4c058692370964eec4d881a1fdc80014f7210b2d13891bad7d1c6",
+		filename:    "cactus_needle-3.3.1-py3-none-macosx_11_0_arm64.whl",
+		checksum:    "19534f411ad71312031d6df5418d0e55b8d16075c28a217aef4b921349bdfb4a",
 		archivePath: "needle/libneedle3.dylib",
 		libraryName: "libneedle3.dylib",
 	},
 	PlatformDarwinAMD64: {
-		filename:    "cactus_needle-3.1.0-py3-none-macosx_11_0_x86_64.whl",
-		checksum:    "31a90adbaa898ea65e92b370e80ba5830a346348022a913a8bb254ab7d20bad6",
+		filename:    "cactus_needle-3.3.1-py3-none-macosx_11_0_x86_64.whl",
+		checksum:    "e74ac1204ffe29d75db1215d889ad46c8add39e52042df22cd99c2e37855c273",
 		archivePath: "needle/libneedle3.dylib",
 		libraryName: "libneedle3.dylib",
 	},
 	PlatformLinuxARM64: {
-		filename:    "cactus_needle-3.1.0-py3-none-manylinux2014_aarch64.whl",
-		checksum:    "f2f30a1178856025ab4bf75ef75e1bf28b8d0552cdd5614f7d06cedc1f713606",
+		filename:    "cactus_needle-3.3.1-py3-none-manylinux2014_aarch64.whl",
+		checksum:    "3128efab8a8cf9f8381a6ea38eee3db66d85746260489563513160940dcbaf63",
 		archivePath: "needle/libneedle3.so",
 		libraryName: "libneedle3.so",
 	},
 	PlatformLinuxAMD64: {
-		filename:    "cactus_needle-3.1.0-py3-none-manylinux2014_x86_64.whl",
-		checksum:    "a0fc2f682ef18525d4d18583081ac31c1f6f211abe6c0b3bee44811ed7e0347e",
+		filename:    "cactus_needle-3.3.1-py3-none-manylinux2014_x86_64.whl",
+		checksum:    "3de03a183f56e28f8f1945fbbc5048efca0699a7f3ed0d66a244ca7e30442c22",
 		archivePath: "needle/libneedle3.so",
 		libraryName: "libneedle3.so",
 	},
 	PlatformLinuxARM64Musl: {
-		filename:    "cactus_needle-3.1.0-py3-none-musllinux_1_2_aarch64.whl",
-		checksum:    "b5e3c48b2c181d29117949f4f55c57cab8c3ccd08d782302b56489fde9c15f73",
+		filename:    "cactus_needle-3.3.1-py3-none-musllinux_1_2_aarch64.whl",
+		checksum:    "c5c73a77cdcdde4b614d8e618c0338d1c8c7be6e32f8d5b6c06f27ffa467ce66",
 		archivePath: "needle/libneedle3.so",
 		libraryName: "libneedle3.so",
 	},
 	PlatformLinuxAMD64Musl: {
-		filename:    "cactus_needle-3.1.0-py3-none-musllinux_1_2_x86_64.whl",
-		checksum:    "835ea0d5765704b65bfaf286e2e94aa2e6027b9494a18adf0fb845f2e3bc7a04",
+		filename:    "cactus_needle-3.3.1-py3-none-musllinux_1_2_x86_64.whl",
+		checksum:    "8d40a1253993426227095e5886294bf0baccace8ec3fce677bc3cc1deacc058a",
 		archivePath: "needle/libneedle3.so",
 		libraryName: "libneedle3.so",
 	},
 	PlatformWindowsAMD64: {
-		filename:    "cactus_needle-3.1.0-py3-none-win_amd64.whl",
-		checksum:    "4f5fc86abfc50d551cdb237a34b501f36d82d4b6f5911ee7bec4e9532d44dd95",
+		filename:    "cactus_needle-3.3.1-py3-none-win_amd64.whl",
+		checksum:    "4e50c5fa983c8737de200d9e96af937dd8135371ca557fe8c7c9eb1adba39f5a",
 		archivePath: "needle/libneedle3.dll",
 		libraryName: "libneedle3.dll",
 	},
 	PlatformWindowsARM64: {
-		filename:    "cactus_needle-3.1.0-py3-none-win_arm64.whl",
-		checksum:    "39806d54910c207cd0ac5dc60009c8c5330072ef729711d74061faf0e99e7a6c",
+		filename:    "cactus_needle-3.3.1-py3-none-win_arm64.whl",
+		checksum:    "4387a5fbca30b4bd7da6b8bb7674a888c26d507f0da2723885f64e9a39f3f437",
 		archivePath: "needle/libneedle3.dll",
 		libraryName: "libneedle3.dll",
 	},
