@@ -173,30 +173,50 @@ var speechWeights = engineArtifact{
 	checksum:    "b6e02f048568ac5d01a2042556c658061e699acbc0aa2a1439f52f3d461dffeb",
 }
 
+// engineRelease pins one downloadable release: the engine wheels per platform
+// and, when the engine needs them, the weights archive published beside them.
 type engineRelease struct {
 	generation              int
 	version, repo, revision string
 	artifacts               map[Platform]engineArtifact
+	// weights is the base archive loaded with needle_load; empty for Needle 2.
+	weights engineArtifact
 }
+
+var (
+	releaseV2 = engineRelease{
+		generation: 2,
+		version:    "2.0.4",
+		repo:       "Cactus-Compute/needle2",
+		revision:   "32e9e3a93b205f786929697446ae669cf0a84579",
+		artifacts:  artifactsV2,
+	}
+	releaseV3 = engineRelease{
+		generation: 3,
+		version:    EngineVersion,
+		repo:       huggingFaceRepo,
+		revision:   huggingFaceRevision,
+		artifacts:  artifacts,
+		weights:    baseWeights,
+	}
+	// whistleRelease pins the speech weights, which run on the Needle 3 engine
+	// and share its cache directory.
+	whistleRelease = engineRelease{
+		generation: 3,
+		version:    EngineVersion,
+		repo:       "Cactus-Compute/whistle",
+		revision:   "b358ddadd89b7a713b5aa131f23032d3cca1b251",
+		artifacts:  artifacts,
+		weights:    speechWeights,
+	}
+)
 
 func releaseFor(generation int) (engineRelease, error) {
 	switch generation {
 	case 2:
-		return engineRelease{
-			generation: 2,
-			version:    "2.0.4",
-			repo:       "Cactus-Compute/needle2",
-			revision:   "32e9e3a93b205f786929697446ae669cf0a84579",
-			artifacts:  artifactsV2,
-		}, nil
+		return releaseV2, nil
 	case 0, 3:
-		return engineRelease{
-			generation: 3,
-			version:    EngineVersion,
-			repo:       huggingFaceRepo,
-			revision:   huggingFaceRevision,
-			artifacts:  artifacts,
-		}, nil
+		return releaseV3, nil
 	default:
 		return engineRelease{}, fmt.Errorf("needle: unsupported generation %d; want 2 or 3", generation)
 	}
@@ -301,10 +321,8 @@ func FetchEngine(ctx context.Context, options FetchOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if options.Generation == 0 || options.Generation == 3 {
-		if _, err := fetchBaseWeights(ctx, options); err != nil {
-			return "", err
-		}
+	if _, err := fetchBaseWeights(ctx, options); err != nil {
+		return "", err
 	}
 	return path, nil
 }
@@ -327,10 +345,7 @@ func FetchWhistle(ctx context.Context, options FetchOptions) (string, error) {
 }
 
 func fetchSpeechWeights(ctx context.Context, options FetchOptions) (string, error) {
-	release, _ := releaseFor(3)
-	release.repo = "Cactus-Compute/whistle"
-	release.revision = "b358ddadd89b7a713b5aa131f23032d3cca1b251"
-	return fetchWithOptions(ctx, options, release, speechWeights)
+	return fetchWithOptions(ctx, options, whistleRelease, whistleRelease.weights)
 }
 
 func fetchEngineLibrary(ctx context.Context, options FetchOptions) (string, error) {
@@ -353,9 +368,17 @@ func fetchEngineLibrary(ctx context.Context, options FetchOptions) (string, erro
 	return fetchWithOptions(ctx, options, release, artifact)
 }
 
+// fetchBaseWeights returns the base archive for the selected generation, or an
+// empty path when the generation embeds its model in the engine.
 func fetchBaseWeights(ctx context.Context, options FetchOptions) (string, error) {
-	release, _ := releaseFor(3)
-	return fetchWithOptions(ctx, options, release, baseWeights)
+	release, err := releaseFor(options.Generation)
+	if err != nil {
+		return "", err
+	}
+	if release.weights.filename == "" {
+		return "", nil
+	}
+	return fetchWithOptions(ctx, options, release, release.weights)
 }
 
 func fetchWithOptions(
