@@ -28,7 +28,7 @@ type agent struct {
 
 // New initializes an Agent, downloading the selected engine and any required
 // base weights when they are not cached. Generation 3 is the default.
-func New(ctx context.Context, config Config) (Agent, error) {
+func New(ctx context.Context, config Config) (*Agent, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func New(ctx context.Context, config Config) (Agent, error) {
 	return prepared, nil
 }
 
-func prepareAgent(config Config) (*agent, error) {
+func prepareAgent(config Config) (*Agent, error) {
 	generation := config.Generation
 	if config.WeightsPath != "" {
 		var err error
@@ -136,7 +136,7 @@ func prepareAgent(config Config) (*agent, error) {
 		return nil, fmt.Errorf("needle: invalid buffer size %d", bufferSize)
 	}
 
-	return &agent{
+	return &Agent{
 		generation:    release.generation,
 		tuned:         config.WeightsPath != "",
 		calibrated:    config.WeightsPath == "",
@@ -175,11 +175,12 @@ func resolveLibraryPath(ctx context.Context, config Config) (string, error) {
 	})
 }
 
-func (a *agent) Complete(ctx context.Context, text string, maxNewTokens int) (Response, error) {
+// Complete performs raw inference without applying response validation.
+func (a *Agent) Complete(ctx context.Context, text string, maxNewTokens int) (Response, error) {
 	return a.complete(ctx, text, maxNewTokens, a.stateless)
 }
 
-func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, reset bool) (Response, error) {
+func (a *Agent) complete(ctx context.Context, text string, maxNewTokens int, reset bool) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
@@ -216,7 +217,7 @@ func (a *agent) complete(ctx context.Context, text string, maxNewTokens int, res
 }
 
 // decodeResponse is called with the runtime mutex held.
-func (a *agent) decodeResponse(code int32) (Response, error) {
+func (a *Agent) decodeResponse(code int32) (Response, error) {
 	data, err := nativeOutput(a.runtime.api, "complete", code, a.buffer)
 	if err != nil {
 		return Response{}, err
@@ -252,8 +253,11 @@ func nativeOutput(api *nativeAPI, operation string, code int32, buffer []byte) (
 }
 
 // Run completes a query, rejects engine validation warnings, and executes
-// accepted tool calls until the model returns a final response.
-func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens int) (Response, error) {
+// accepted tool calls until the model returns a final response. It uses
+// ValidateResponse to reject an entire flagged turn before executing any tool
+// calls, without retrying, and returns the raw flagged response together with
+// results from earlier completed rounds.
+func (a *Agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens int) (Response, error) {
 	if maxSteps == 0 {
 		maxSteps = DefaultMaxSteps
 	}
@@ -298,7 +302,8 @@ func (a *agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens in
 	return response, nil
 }
 
-func (a *agent) Reset(ctx context.Context) error {
+// Reset rewinds the conversation.
+func (a *Agent) Reset(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -314,7 +319,7 @@ func (a *agent) Reset(ctx context.Context) error {
 	return nil
 }
 
-func (a *agent) execute(ctx context.Context, call FunctionCall) any {
+func (a *Agent) execute(ctx context.Context, call FunctionCall) any {
 	handler, ok := a.handlers[call.Name]
 	if !ok {
 		return map[string]string{"error": "unknown tool: " + call.Name}

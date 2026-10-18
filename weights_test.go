@@ -102,7 +102,7 @@ func TestCustomWeightsConfidenceUsesLoadedBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		second.runtime = runtime
-		for _, a := range []*agent{second, first} {
+		for _, a := range []*Agent{second, first} {
 			fake.responses = append(fake.responses, []byte(`{"type":"call","confidence":0.9}`))
 			response, err := a.Complete(context.Background(), "hello", 1)
 			if err != nil || (response.Confidence != nil) != calibrated {
@@ -122,7 +122,7 @@ func TestCustomWeightsConfidenceUsesLoadedBytes(t *testing.T) {
 			t.Fatal(err)
 		}
 		other.runtime = runtime
-		for _, a := range []*agent{other, first} {
+		for _, a := range []*Agent{other, first} {
 			fake.responses = append(fake.responses, []byte(`{"type":"call","confidence":0.9}`))
 			response, err := a.Complete(context.Background(), "hello", 1)
 			want := calibrated

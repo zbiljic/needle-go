@@ -36,14 +36,6 @@ func (a *fakeAgent) Complete(_ context.Context, input string, tokens int) (needl
 	return response, nil
 }
 
-func (a *fakeAgent) Run(context.Context, string, int, int) (needle.Response, error) {
-	return needle.Response{}, errors.New("unexpected Run call")
-}
-
-func (a *fakeAgent) Embed(context.Context, string) ([]float32, error) {
-	return nil, errors.New("unexpected Embed call")
-}
-
 func (a *fakeAgent) Reset(context.Context) error {
 	a.resets++
 	return a.err
@@ -57,7 +49,7 @@ func testApplication(input string) (*application, *bytes.Buffer, *bytes.Buffer) 
 		stdout: stdout,
 		stderr: stderr,
 		deps: dependencies{
-			newAgent: func(context.Context, needle.Config) (needle.Agent, error) {
+			newAgent: func(context.Context, needle.Config) (session, error) {
 				return &fakeAgent{}, nil
 			},
 			fetchEngine: func(context.Context, needle.FetchOptions) (string, error) {
@@ -161,7 +153,7 @@ func TestComplete(t *testing.T) {
 	}}}
 	app, stdout, stderr := testApplication("")
 	var gotConfig needle.Config
-	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (session, error) {
 		gotConfig = config
 		return fake, nil
 	}
@@ -198,7 +190,7 @@ func TestCompleteValidationJSON(t *testing.T) {
 		Validation: &needle.Validation{Ungrounded: []string{"weather.city"}, Negation: true},
 	}}}
 	app, stdout, stderr := testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) { return fake, nil }
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) { return fake, nil }
 	if code := app.run(context.Background(), []string{"complete", "--prompt", "weather"}); code != 0 {
 		t.Fatalf("complete exit code = %d, stderr = %q", code, stderr.String())
 	}
@@ -216,7 +208,7 @@ func TestCompleteReadsStdin(t *testing.T) {
 
 	fake := &fakeAgent{}
 	app, _, stderr := testApplication("extract this invoice\n")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return fake, nil
 	}
 	if code := app.run(context.Background(), []string{"complete"}); code != 0 {
@@ -235,7 +227,7 @@ func TestREPL(t *testing.T) {
 		{Type: needle.ResponseRespond},
 	}}
 	app, stdout, stderr := testApplication("first\n.reset\nsecond\n.exit\n")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return fake, nil
 	}
 	if code := app.run(context.Background(), []string{"repl"}); code != 0 {
@@ -267,7 +259,7 @@ func TestDoctor(t *testing.T) {
 	}}}
 	app, stdout, stderr := testApplication("")
 	cacheDir := t.TempDir()
-	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (session, error) {
 		if config.LibraryPath != libraryPath ||
 			config.CacheDir != cacheDir ||
 			config.Generation != 3 {
@@ -326,7 +318,7 @@ func TestConformance(t *testing.T) {
 	var configs []needle.Config
 
 	app, stdout, stderr := testApplication("")
-	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (session, error) {
 		configs = append(configs, config)
 		if len(config.Tools) == 0 {
 			return &fakeAgent{responses: []needle.Response{{Type: needle.ResponseCall, Success: true}}}, nil
@@ -394,7 +386,7 @@ func TestConformanceFailure(t *testing.T) {
 	t.Parallel()
 
 	app, stdout, stderr := testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return nil, errors.New("broken runtime")
 	}
 	if code := app.run(context.Background(), []string{"test"}); code != 1 {
@@ -441,7 +433,7 @@ func TestDoctorWeightsSelectGeneration(t *testing.T) {
 		}
 		return "/cache/libneedle", nil
 	}
-	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (session, error) {
 		if config.Generation != 2 ||
 			config.CacheDir != cache ||
 			config.WeightsPath != weights {

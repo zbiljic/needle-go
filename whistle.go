@@ -161,13 +161,13 @@ func (w *Whistle) Transcribe(ctx context.Context, pcm []float32, options AudioOp
 
 // Complete transcribes PCM and completes a raw Needle 3 turn inside the engine.
 // It returns tool calls without executing handlers or applying ValidateResponse.
-// agent must be a Needle 3 Agent created by New and share this Whistle's engine.
-func (w *Whistle) Complete(ctx context.Context, textAgent Agent, pcm []float32, options AudioOptions, maxNewTokens int) (Response, error) {
+// textAgent must be a Needle 3 Agent created by New that shares this engine.
+func (w *Whistle) Complete(ctx context.Context, textAgent *Agent, pcm []float32, options AudioOptions, maxNewTokens int) (Response, error) {
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
-	a, ok := textAgent.(*agent)
-	if !ok || a == nil || a.generation != 3 || a.runtime != w.runtime {
+	a := textAgent
+	if a == nil || a.generation != 3 || a.runtime != w.runtime {
 		return Response{}, errors.New("needle: audio completion requires a Needle 3 agent sharing the speech engine")
 	}
 	if maxNewTokens == 0 {

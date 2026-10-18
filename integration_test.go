@@ -85,7 +85,7 @@ func TestNativeGenerations(t *testing.T) {
 		t.Skip("set NEEDLE_TEST_NATIVE=1 to test both generations in one process")
 	}
 	ctx := context.Background()
-	var agents []Agent
+	var agents []*Agent
 	for _, generation := range []int{2, 3} {
 		a, err := New(ctx, Config{Generation: generation})
 		if err != nil {
@@ -126,7 +126,7 @@ func TestNativeGenerations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []Agent{custom, agents[1]} {
+	for _, a := range []*Agent{custom, agents[1]} {
 		r, err := a.Complete(ctx, "hello", DefaultMaxNewTokens)
 		if err != nil || !r.Success || r.Confidence == nil {
 			t.Fatalf("custom=%v response=%+v err=%v", a == custom, r, err)

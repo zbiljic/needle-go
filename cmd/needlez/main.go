@@ -21,8 +21,15 @@ const maxInputSize = 8 << 20
 
 var version = "dev"
 
+// session is the subset of *needle.Agent the commands use, so tests can
+// substitute a fake.
+type session interface {
+	Complete(ctx context.Context, text string, maxNewTokens int) (needle.Response, error)
+	Reset(ctx context.Context) error
+}
+
 type dependencies struct {
-	newAgent        func(context.Context, needle.Config) (needle.Agent, error)
+	newAgent        func(context.Context, needle.Config) (session, error)
 	fetchEngine     func(context.Context, needle.FetchOptions) (string, error)
 	cachedEngine    func(needle.FetchOptions) (string, error)
 	currentPlatform func() (needle.Platform, error)
@@ -52,7 +59,13 @@ func main() {
 		stderr:      os.Stderr,
 		interactive: interactive,
 		deps: dependencies{
-			newAgent:        needle.New,
+			newAgent: func(ctx context.Context, config needle.Config) (session, error) {
+				agent, err := needle.New(ctx, config)
+				if err != nil {
+					return nil, err
+				}
+				return agent, nil
+			},
 			fetchEngine:     needle.FetchEngine,
 			cachedEngine:    needle.CachedEngine,
 			currentPlatform: needle.CurrentPlatform,

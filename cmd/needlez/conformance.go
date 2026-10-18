@@ -13,7 +13,7 @@ import (
 )
 
 type conformanceSuite struct {
-	newAgent  func(context.Context, needle.Config) (needle.Agent, error)
+	newAgent  func(context.Context, needle.Config) (session, error)
 	config    needle.Config
 	maxTokens int
 }
@@ -240,7 +240,7 @@ func (s conformanceSuite) agent(
 	ctx context.Context,
 	tools []needle.Tool,
 	system string,
-) (needle.Agent, error) {
+) (session, error) {
 	config := s.config
 	config.Tools = tools
 	config.System = system

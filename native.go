@@ -53,7 +53,7 @@ type processRuntime struct {
 
 	api           *nativeAPI
 	libraryPath   string
-	active        *agent
+	active        *Agent
 	activeWeights string
 	activeBlob    []byte
 	speechWeights string
@@ -115,7 +115,7 @@ func (r *processRuntime) ensureLibraryLocked(path string) error {
 	return nil
 }
 
-func (r *processRuntime) bindLocked(a *agent) error {
+func (r *processRuntime) bindLocked(a *Agent) error {
 	if r.api == nil {
 		return errors.New("needle: engine is not loaded")
 	}

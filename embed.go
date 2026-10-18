@@ -9,7 +9,9 @@ import (
 // maxEmbeddingFloats caps text vectors at 4 MiB; raise it if a future model needs wider features.
 const maxEmbeddingFloats = 1 << 20
 
-func (a *agent) Embed(ctx context.Context, text string) ([]float32, error) {
+// Embed returns text features from Needle 3 without resetting the conversation.
+// Engines without embedding support return an error.
+func (a *Agent) Embed(ctx context.Context, text string) ([]float32, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

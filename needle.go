@@ -109,16 +109,19 @@ type Config struct {
 	CacheDir string
 }
 
-// Agent defines the Needle conversation lifecycle.
-type Agent interface {
-	// Complete performs raw inference without applying response validation.
-	Complete(ctx context.Context, text string, maxNewTokens int) (Response, error)
-	// Embed returns text features from Needle 3 without resetting the conversation.
-	// Engines without embedding support return an error.
-	Embed(ctx context.Context, text string) ([]float32, error)
-	// Run uses ValidateResponse to reject an entire flagged turn before executing
-	// any tool calls, without retrying. It returns the raw flagged response and
-	// results from earlier completed rounds.
-	Run(ctx context.Context, query string, maxSteps, maxNewTokens int) (Response, error)
-	Reset(ctx context.Context) error
+// Agent is a Needle conversation bound to a process-global native runtime.
+// Create one with New. Methods are safe for concurrent use; native calls for
+// one generation are serialized.
+type Agent struct {
+	runtime       *processRuntime
+	generation    int
+	tuned         bool
+	calibrated    bool
+	stateless     bool
+	handlers      map[string]ToolHandler
+	system        []byte
+	tools         []byte
+	weightsPath   string
+	toolIndexPath []byte
+	buffer        []byte
 }

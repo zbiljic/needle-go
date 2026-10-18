@@ -58,7 +58,7 @@ func (f *fakeNative) api() *nativeAPI {
 	}
 }
 
-func newTestAgent(t *testing.T, fake *fakeNative, config Config) (*agent, *processRuntime) {
+func newTestAgent(t *testing.T, fake *fakeNative, config Config) (*Agent, *processRuntime) {
 	t.Helper()
 	prepared, err := prepareAgent(config)
 	if err != nil {
@@ -1000,7 +1000,7 @@ func TestGenerationSelectionAndUncalibratedCustomWeights(t *testing.T) {
 			}
 			return init(system, tools, index)
 		}
-		for _, a := range []*agent{base, tuned, base} {
+		for _, a := range []*Agent{base, tuned, base} {
 			fake.responses = append(fake.responses,
 				[]byte(`{"type":"call","confidence":0.9,"function_calls":[]}`),
 			)

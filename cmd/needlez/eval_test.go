@@ -135,7 +135,7 @@ func TestEval(t *testing.T) {
 	}}
 	app, stdout, stderr := testApplication("")
 	var gotConfig needle.Config
-	app.deps.newAgent = func(_ context.Context, config needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(_ context.Context, config needle.Config) (session, error) {
 		gotConfig = config
 		return fake, nil
 	}
@@ -203,7 +203,7 @@ func TestEvalJSON(t *testing.T) {
 		{Type: needle.ResponseRespond, Success: true, Confidence: &confidence},
 	}}
 	app, stdout, stderr := testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return fake, nil
 	}
 	if code := app.run(context.Background(), []string{
@@ -263,7 +263,7 @@ func TestEvalMinimumScore(t *testing.T) {
 	}
 
 	app, stdout, stderr := testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return &fakeAgent{responses: []needle.Response{response}}, nil
 	}
 	if code := app.run(context.Background(), []string{
@@ -277,7 +277,7 @@ func TestEvalMinimumScore(t *testing.T) {
 	}
 
 	app, _, stderr = testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return &fakeAgent{responses: []needle.Response{response}}, nil
 	}
 	if code := app.run(context.Background(), []string{
@@ -287,7 +287,7 @@ func TestEvalMinimumScore(t *testing.T) {
 	}
 
 	app, stdout, stderr = testApplication("")
-	app.deps.newAgent = func(context.Context, needle.Config) (needle.Agent, error) {
+	app.deps.newAgent = func(context.Context, needle.Config) (session, error) {
 		return &fakeAgent{responses: []needle.Response{response}}, nil
 	}
 	if code := app.run(context.Background(), []string{
