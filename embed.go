@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// ponytail: cap text vectors at 4 MiB; raise if a future model needs wider features.
+// maxEmbeddingFloats caps text vectors at 4 MiB; raise it if a future model needs wider features.
 const maxEmbeddingFloats = 1 << 20
 
 func (a *agent) Embed(ctx context.Context, text string) ([]float32, error) {

@@ -69,7 +69,7 @@ func weightsKind(blob []byte) int {
 		}
 		return modelText
 	}
-	// ponytail: recognize the published version-1 audio manifest only; extend
+	// Recognize the published version-1 audio manifest only; extend
 	// this classifier when upstream publishes another speech archive layout.
 	if record[0] == 2 && record[1] == 1 && shape == 13 && size == 52 && index+1 < count {
 		value := func(i int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:])) }
