@@ -118,6 +118,10 @@ func (w *Whistle) bindLocked() error {
 	if w.runtime.speechWeights == w.weightsPath {
 		return nil
 	}
+	if w.runtime.stream != nil {
+		// Switching speech weights would discard the open stream.
+		return ErrStreamActive
+	}
 	blob, err := os.ReadFile(w.weightsPath)
 	if err != nil {
 		return fmt.Errorf("needle: read speech weights: %w", err)
@@ -133,11 +137,15 @@ func (w *Whistle) bindLocked() error {
 	return nil
 }
 
-// Close releases the response buffer. Later calls return ErrClosed. Loaded
-// speech weights stay in the engine for other Whistle values.
+// Close ends an open stream of this Whistle and releases the response buffer.
+// Later calls return ErrClosed. Loaded speech weights stay in the engine for
+// other Whistle values.
 func (w *Whistle) Close() error {
 	w.runtime.mu.Lock()
 	defer w.runtime.mu.Unlock()
+	if s := w.runtime.stream; s != nil && s.whistle == w {
+		s.endLocked()
+	}
 	w.closed = true
 	w.buffer = nil
 	return nil
@@ -159,6 +167,9 @@ func (w *Whistle) Transcribe(ctx context.Context, pcm []float32, options AudioOp
 	defer w.runtime.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return Transcript{}, err
+	}
+	if w.runtime.stream != nil {
+		return Transcript{}, ErrStreamActive
 	}
 	if err := w.bindLocked(); err != nil {
 		return Transcript{}, err
@@ -203,6 +214,9 @@ func (w *Whistle) Complete(ctx context.Context, textAgent *Agent, pcm []float32,
 	if err := ctx.Err(); err != nil {
 		return Response{}, err
 	}
+	if w.runtime.stream != nil {
+		return Response{}, ErrStreamActive
+	}
 	if err := w.bindLocked(); err != nil {
 		return Response{}, err
 	}
@@ -228,14 +242,21 @@ func (w *Whistle) reserve(samples int) {
 	}
 }
 
-func prepareAudio(pcm []float32, options AudioOptions) ([]byte, []byte, int32, error) {
+func checkPCM(pcm []float32) error {
 	if len(pcm) > math.MaxInt32 {
-		return nil, nil, 0, fmt.Errorf("needle: audio has %d samples; want at most %d", len(pcm), math.MaxInt32)
+		return fmt.Errorf("needle: audio has %d samples; want at most %d", len(pcm), math.MaxInt32)
 	}
 	for i, sample := range pcm {
 		if sample != sample || sample < -1 || sample > 1 {
-			return nil, nil, 0, fmt.Errorf("needle: invalid PCM sample at index %d; want finite values in [-1, 1]", i)
+			return fmt.Errorf("needle: invalid PCM sample at index %d; want finite values in [-1, 1]", i)
 		}
+	}
+	return nil
+}
+
+func prepareAudio(pcm []float32, options AudioOptions) ([]byte, []byte, int32, error) {
+	if err := checkPCM(pcm); err != nil {
+		return nil, nil, 0, err
 	}
 	switch options.Language {
 	case "", "en", "de", "fr", "es", "it", "nl", "pl":

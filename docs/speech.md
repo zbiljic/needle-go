@@ -2,7 +2,7 @@
 
 `NewWhistle` loads the pinned ~16.9 MB `whistle.cact` archive from
 [Cactus-Compute/whistle](https://huggingface.co/Cactus-Compute/whistle) and uses the
-Needle 3.1 engine. Speech weights are fetched only when requested; standalone
+Needle 3 engine. Speech weights are fetched only when requested; standalone
 transcription does not require text weights.
 
 ## Transcription
@@ -29,6 +29,35 @@ include `TTFTMS`, `DecodeTPS`, and optional words with start/end times in second
 and probabilities. File decoding, microphone capture and resampling belong to
 the caller; the [PCM example](../examples/transcribe) accepts little-endian float32
 samples.
+
+## Live transcription
+
+`Stream` transcribes as audio arrives. Feed about one second of PCM per
+`Process` call; each step returns the words two consecutive passes agreed on,
+with times from the start of the stream, plus the unconfirmed `Pending` tail.
+`Stop` commits the tail and ends the stream.
+
+```go
+live, err := speech.Stream(needle.AudioOptions{Language: "en"})
+if err != nil {
+	log.Fatal(err)
+}
+for chunk := range chunks {
+	step, err := live.Process(ctx, chunk)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Print(step.Text, " ")
+}
+tail, err := live.Stop(ctx)
+```
+
+The engine holds one stream per process. While a stream is open, other
+speech calls, a second stream, and loading different speech weights return
+`ErrStreamActive`; a failed `Process` ends the stream, and `Close` on its
+Whistle ends it too. Streaming needs engine 3.2 or newer; older libraries
+return `ErrSpeechUnsupported`. Pass `-stream` to the [PCM example](../examples/transcribe)
+to see it on a file.
 
 ## Audio tool calling
 

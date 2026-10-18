@@ -18,7 +18,7 @@ func TestRegisterNativeABI(t *testing.T) {
 			var gotInput string
 			var gotTokens, gotCapacity, gotSamples int32
 			var gotPCM *float32
-			transcriptions, audioSettings := 0, 0
+			transcriptions, audioSettings, streams := 0, 0, 0
 			embedCalls := 0
 			embed := func(input *byte, output *float32, capacity int32) int32 {
 				embedCalls++
@@ -77,6 +77,22 @@ func TestRegisterNativeABI(t *testing.T) {
 					}
 					return embed(input, output, capacity)
 				})
+				symbols["needle_stream_transcribe_process"] = purego.NewCallback(func(pcm *float32, samples int32, language, keywords *byte, output *byte, capacity int32) int32 {
+					streams++
+					if pcm == nil || samples != 2 || *pcm != 0.25 || readCString(language) != "en" || readCString(keywords) != "Paris\nAda" || capacity != 32 {
+						t.Error("incorrect six-argument stream ABI")
+					}
+					copy(unsafe.Slice(output, capacity), "step\x00")
+					return 3
+				})
+				symbols["needle_stream_transcribe_stop"] = purego.NewCallback(func(output *byte, capacity int32) int32 {
+					streams++
+					if capacity != 32 {
+						t.Error("incorrect stream stop ABI")
+					}
+					copy(unsafe.Slice(output, capacity), "tail\x00")
+					return 0
+				})
 				diagnostic := []byte("native detail\x00")
 				symbols["needle_last_error"] = purego.NewCallback(func() *byte { return &diagnostic[0] })
 			}
@@ -98,7 +114,7 @@ func TestRegisterNativeABI(t *testing.T) {
 			if calls != 1 || gotInput != "hello" || gotTokens != 123 || gotCapacity != 32 || gotPCM != nil || gotSamples != 0 || string(output[:8]) != "response" {
 				t.Fatalf("ABI arguments: calls=%d input=%q tokens=%d capacity=%d pcm=%p samples=%d output=%q", calls, gotInput, gotTokens, gotCapacity, gotPCM, gotSamples, output)
 			}
-			if api.handle != 42 || (api.completeAudio != nil) != modern || (api.lastError != nil) != modern {
+			if api.handle != 42 || (api.completeAudio != nil) != modern || (api.lastError != nil) != modern || (api.streamProcess != nil) != modern || (api.streamStop != nil) != modern {
 				t.Fatal("wrong native capabilities")
 			}
 			if modern && api.lastError() != "native detail" {
@@ -115,6 +131,12 @@ func TestRegisterNativeABI(t *testing.T) {
 				api.setAudio(nil, nil, 0)
 				if transcriptions != 1 || audioSettings != 2 {
 					t.Fatalf("transcriptions=%d audio settings=%d", transcriptions, audioSettings)
+				}
+				if code := api.streamProcess(&pcm[0], 2, &language[0], &keywords[0], output, 32); code != 3 || string(output[:4]) != "step" {
+					t.Fatalf("stream ABI: code=%d output=%q", code, output)
+				}
+				if code := api.streamStop(output, 32); code != 0 || string(output[:4]) != "tail" || streams != 2 {
+					t.Fatalf("stream stop ABI: code=%d output=%q streams=%d", code, output, streams)
 				}
 			}
 			vector := make([]float32, 2)
@@ -145,6 +167,17 @@ func TestRegisterNativeABI(t *testing.T) {
 					t.Fatalf("missing %s: %v", name, err)
 				}
 				symbols[name] = address
+			}
+			if modern {
+				// Engine 3.1 has speech without the streaming pair.
+				process, stop := symbols["needle_stream_transcribe_process"], symbols["needle_stream_transcribe_stop"]
+				delete(symbols, "needle_stream_transcribe_process")
+				delete(symbols, "needle_stream_transcribe_stop")
+				older, err := registerNative(42, resolve)
+				if err != nil || older.streamProcess != nil || older.streamStop != nil || older.transcribe == nil {
+					t.Fatalf("engine without streaming: api=%+v err=%v", older, err)
+				}
+				symbols["needle_stream_transcribe_process"], symbols["needle_stream_transcribe_stop"] = process, stop
 			}
 		})
 	}

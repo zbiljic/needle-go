@@ -1,10 +1,12 @@
-// Transcribe a file of little-endian float32 mono samples recorded at 16000 Hz.
+// Transcribe a file of little-endian float32 mono samples recorded at 16000 Hz,
+// in one pass or, with -stream, live in one-second chunks.
 package main
 
 import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"flag"
 	"io"
 	"log"
 	"math"
@@ -17,10 +19,12 @@ import (
 const maxSamples = 10 * 60 * needle.SpeechSampleRate
 
 func main() {
-	if len(os.Args) != 2 {
-		log.Fatal("usage: go run ./examples/transcribe clip.f32 (16000 Hz mono float32 PCM)")
+	stream := flag.Bool("stream", false, "transcribe live in one-second chunks")
+	flag.Parse()
+	if flag.NArg() != 1 {
+		log.Fatal("usage: go run ./examples/transcribe [-stream] clip.f32 (16000 Hz mono float32 PCM)")
 	}
-	file, err := os.Open(os.Args[1])
+	file, err := os.Open(flag.Arg(0))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -41,11 +45,35 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	transcript, err := speech.Transcribe(ctx, pcm, needle.AudioOptions{WordTimestamps: true})
+	encoder := json.NewEncoder(os.Stdout)
+	if !*stream {
+		transcript, err := speech.Transcribe(ctx, pcm, needle.AudioOptions{WordTimestamps: true})
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := encoder.Encode(transcript); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	live, err := speech.Stream(needle.AudioOptions{})
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := json.NewEncoder(os.Stdout).Encode(transcript); err != nil {
+	for start := 0; start < len(pcm); start += needle.SpeechSampleRate {
+		step, err := live.Process(ctx, pcm[start:min(start+needle.SpeechSampleRate, len(pcm))])
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := encoder.Encode(step); err != nil {
+			log.Fatal(err)
+		}
+	}
+	tail, err := live.Stop(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := encoder.Encode(tail); err != nil {
 		log.Fatal(err)
 	}
 }

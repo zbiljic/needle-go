@@ -26,6 +26,9 @@ var (
 	// ErrValidation is wrapped by ValidateResponse, and by Run, when the engine
 	// flags a response.
 	ErrValidation = errors.New("needle: response validation")
+	// ErrStreamActive indicates that a live transcription is open on the
+	// engine, so other speech calls must wait for its Stop.
+	ErrStreamActive = errors.New("needle: a live transcription is in progress")
 	// ErrClosed is returned by an Agent or Whistle after Close.
 	ErrClosed = errors.New("needle: closed")
 )

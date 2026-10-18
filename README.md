@@ -13,7 +13,7 @@ It provides:
 - typed Go tool handlers
 - structured response extraction
 - Needle 3 text embeddings
-- opt-in Whistle speech transcription and audio tool calling
+- opt-in Whistle speech transcription, live streaming and audio tool calling
 
 > This project is in early development and its API may change.
 
@@ -137,9 +137,9 @@ NEEDLE_TEST_NATIVE=1 go test -run '^TestNativeEmbeddings$' -v .
 
 ## Speech
 
-`NewWhistle` adds optional speech transcription and audio tool calling with
-Needle 3. It accepts 16 kHz mono `[]float32` PCM of any length. Speech weights
-are downloaded only when requested.
+`NewWhistle` adds optional speech transcription, live streaming transcription
+and audio tool calling with Needle 3. It accepts 16 kHz mono `[]float32` PCM of
+any length. Speech weights are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages and offline
 setup, or try the [PCM example](examples/transcribe).
@@ -196,8 +196,8 @@ for the library and trusts the caller's file.
 
 Errors wrap sentinels for `errors.Is`: `ErrValidation` (also wrapped by `Run`),
 `ErrUnsupportedGeneration`, `ErrEmbeddingUnsupported`, `ErrSpeechUnsupported`,
-`ErrUnsupportedABI`, `ErrUnsupportedPlatform`, `ErrEngineNotFound` and
-`ErrClosed`. A failed engine call is a `*NativeError` with the operation, the
+`ErrUnsupportedABI`, `ErrUnsupportedPlatform`, `ErrEngineNotFound`,
+`ErrStreamActive` and `ErrClosed`. A failed engine call is a `*NativeError` with the operation, the
 native code and any engine diagnostic, for `errors.As`.
 
 ## Native engine diagnostics

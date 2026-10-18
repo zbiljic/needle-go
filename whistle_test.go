@@ -383,6 +383,26 @@ func TestNativeWhistle(t *testing.T) {
 	if transcript, err := w.Transcribe(ctx, nil, AudioOptions{}); err != nil || transcript.Text != "" {
 		t.Fatalf("speech after text switch=%+v err=%v", transcript, err)
 	}
+	// Live transcription: one-second chunks of silence, then the tail.
+	stream, err := w.Stream(AudioOptions{Language: "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		step, err := stream.Process(ctx, make([]float32, SpeechSampleRate))
+		if err != nil || step.Text != "" || step.Received <= 0 {
+			t.Fatalf("chunk %d step=%+v err=%v", i, step, err)
+		}
+	}
+	if _, err := w.Transcribe(ctx, nil, AudioOptions{}); !errors.Is(err, ErrStreamActive) {
+		t.Fatalf("Transcribe() during stream error = %v", err)
+	}
+	if tail, err := stream.Stop(ctx); err != nil || tail.Text != "" || tail.Pending != "" {
+		t.Fatalf("tail=%+v err=%v", tail, err)
+	}
+	if transcript, err := w.Transcribe(ctx, nil, AudioOptions{}); err != nil || transcript.Text != "" {
+		t.Fatalf("speech after stream=%+v err=%v", transcript, err)
+	}
 }
 
 func TestWhistleClose(t *testing.T) {

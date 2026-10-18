@@ -15,6 +15,8 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 	setAudio, _ := symbol(handle, "needle_set_audio")
 	lastError, _ := symbol(handle, "needle_last_error")
 	embed, _ := symbol(handle, "needle_embed")
+	streamProcess, _ := symbol(handle, "needle_stream_transcribe_process")
+	streamStop, _ := symbol(handle, "needle_stream_transcribe_stop")
 	audioABI := models != 0 || transcribe != 0 || setAudio != 0
 	if audioABI {
 		// These symbols were introduced together with the six-argument completion ABI.
@@ -33,6 +35,14 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 		}
 		if embed == 0 {
 			return nil, fmt.Errorf("%w: missing needle_embed", ErrUnsupportedABI)
+		}
+		// Streaming arrived with engine 3.2.0 as a pair of symbols.
+		if (streamProcess != 0) != (streamStop != 0) {
+			missing := "needle_stream_transcribe_stop"
+			if streamProcess == 0 {
+				missing = "needle_stream_transcribe_process"
+			}
+			return nil, fmt.Errorf("%w: missing %s", ErrUnsupportedABI, missing)
 		}
 	}
 	if lastError != 0 {
@@ -63,6 +73,10 @@ func registerNative(handle uintptr, symbol func(uintptr, string) (uintptr, error
 	if audioABI {
 		purego.RegisterFunc(&api.transcribe, transcribe)
 		purego.RegisterFunc(&api.setAudio, setAudio)
+		if streamProcess != 0 {
+			purego.RegisterFunc(&api.streamProcess, streamProcess)
+			purego.RegisterFunc(&api.streamStop, streamStop)
+		}
 		api.complete = func(input *byte, tokens int32, output []byte, capacity int32) int32 {
 			return api.completeAudio(input, nil, 0, tokens, output, capacity)
 		}
