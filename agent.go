@@ -302,6 +302,20 @@ func (a *Agent) Run(ctx context.Context, query string, maxSteps, maxNewTokens in
 	return response, nil
 }
 
+// Close releases the agent's native binding and response buffer. Later calls
+// return ErrClosed. Close is idempotent and does not unload the engine or its
+// weights, which remain available to other agents in the process.
+func (a *Agent) Close() error {
+	a.runtime.mu.Lock()
+	defer a.runtime.mu.Unlock()
+	if a.runtime.active == a {
+		a.runtime.active = nil
+	}
+	a.closed = true
+	a.buffer = nil
+	return nil
+}
+
 // Reset rewinds the conversation.
 func (a *Agent) Reset(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {

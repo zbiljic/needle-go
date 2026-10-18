@@ -1095,3 +1095,46 @@ func readCString(pointer *byte) string {
 		data = append(data, value)
 	}
 }
+
+func TestClose(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNative{responses: [][]byte{[]byte(`{"type":"respond"}`)}}
+	a, runtime := newTestAgent(t, fake, Config{})
+	if err := a.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if runtime.active != nil {
+		t.Fatal("closed agent is still bound")
+	}
+	if err := a.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	ctx := context.Background()
+	if _, err := a.Complete(ctx, "hello", 0); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if _, err := a.Run(ctx, "hello", 0, 0); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := a.Embed(ctx, "hello"); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Embed() error = %v", err)
+	}
+	if err := a.Reset(ctx); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Reset() error = %v", err)
+	}
+	if fake.resets != 0 || len(fake.inputs) != 0 {
+		t.Fatal("closed agent reached the engine")
+	}
+	// The next agent reinitializes the native session.
+	other, err := prepareAgent(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.runtime = runtime
+	if _, err := other.Complete(ctx, "hello", 0); err != nil {
+		t.Fatalf("Complete() after close error = %v", err)
+	}
+	if len(fake.systems) != 2 || runtime.active != other {
+		t.Fatalf("init calls = %d, active = %p", len(fake.systems), runtime.active)
+	}
+}

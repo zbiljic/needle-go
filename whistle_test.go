@@ -384,3 +384,26 @@ func TestNativeWhistle(t *testing.T) {
 		t.Fatalf("speech after text switch=%+v err=%v", transcript, err)
 	}
 }
+
+func TestWhistleClose(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNative{}
+	a, r := newTestAgent(t, fake, Config{})
+	w := newTestWhistle(t, r)
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	ctx := context.Background()
+	if _, err := w.Transcribe(ctx, nil, AudioOptions{}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Transcribe() error = %v", err)
+	}
+	if _, err := w.Complete(ctx, a, nil, AudioOptions{}, 0); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if fake.loads != 0 {
+		t.Fatal("closed Whistle loaded weights")
+	}
+}

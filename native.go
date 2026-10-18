@@ -119,6 +119,9 @@ func (r *processRuntime) bindLocked(a *Agent) error {
 	if r.api == nil {
 		return errors.New("needle: engine is not loaded")
 	}
+	if a.closed {
+		return ErrClosed
+	}
 	if r.active == a {
 		return nil
 	}

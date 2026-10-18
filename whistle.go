@@ -60,6 +60,7 @@ type Whistle struct {
 	runtime     *processRuntime
 	weightsPath string
 	buffer      []byte
+	closed      bool
 }
 
 // NewWhistle loads speech weights without downloading or initializing text weights.
@@ -106,6 +107,9 @@ func NewWhistle(ctx context.Context, config WhistleConfig) (*Whistle, error) {
 }
 
 func (w *Whistle) bindLocked() error {
+	if w.closed {
+		return ErrClosed
+	}
 	api := w.runtime.api
 	if api == nil || api.transcribe == nil || api.setAudio == nil || api.completeAudio == nil {
 		return errors.New("needle: engine does not support speech; use Needle 3.1 or newer")
@@ -125,6 +129,16 @@ func (w *Whistle) bindLocked() error {
 		return api.failure("load speech weights", code, "")
 	}
 	w.runtime.speechBlob, w.runtime.speechWeights = blob, w.weightsPath
+	return nil
+}
+
+// Close releases the response buffer. Later calls return ErrClosed. Loaded
+// speech weights stay in the engine for other Whistle values.
+func (w *Whistle) Close() error {
+	w.runtime.mu.Lock()
+	defer w.runtime.mu.Unlock()
+	w.closed = true
+	w.buffer = nil
 	return nil
 }
 

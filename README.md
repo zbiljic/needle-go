@@ -104,6 +104,12 @@ between its tool rounds. Keep the default stateful mode for manual tool loops
 that feed results back through `Complete`, and call `Reset` between independent
 queries.
 
+## Closing
+
+`Close` releases an agent's response buffer and native binding; later calls
+return `ErrClosed`. The engine and loaded weights stay in the process for other
+agents. `Whistle` has the same `Close`.
+
 ## Text embeddings
 
 Needle 3 agents expose text features as `[]float32`:

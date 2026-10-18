@@ -124,4 +124,5 @@ type Agent struct {
 	weightsPath   string
 	toolIndexPath []byte
 	buffer        []byte
+	closed        bool
 }
