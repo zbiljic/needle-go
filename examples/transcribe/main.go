@@ -13,6 +13,9 @@ import (
 	needle "github.com/zbiljic/needle-go"
 )
 
+// maxSamples bounds memory for this example; the engine itself accepts any length.
+const maxSamples = 10 * 60 * needle.SpeechSampleRate
+
 func main() {
 	if len(os.Args) != 2 {
 		log.Fatal("usage: go run ./examples/transcribe clip.f32 (16000 Hz mono float32 PCM)")
@@ -22,12 +25,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, needle.MaxSpeechSamples*4+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxSamples*4+1))
 	if err != nil {
 		log.Fatal(err)
 	}
-	if len(data) > needle.MaxSpeechSamples*4 || len(data)%4 != 0 {
-		log.Fatal("PCM must contain whole float32 samples, at most 30 seconds")
+	if len(data) > maxSamples*4 || len(data)%4 != 0 {
+		log.Fatal("PCM must contain whole float32 samples, at most ten minutes")
 	}
 	pcm := make([]float32, len(data)/4)
 	for i := range pcm {

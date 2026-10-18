@@ -14,10 +14,11 @@ import (
 const (
 	// SpeechSampleRate is the required rate for mono float32 PCM.
 	SpeechSampleRate = 16000
-	// MaxSpeechSamples limits a clip to 30 seconds.
-	MaxSpeechSamples = 30 * SpeechSampleRate
-	// DefaultSpeechBufferSize accommodates transcripts with word timestamps.
+	// DefaultSpeechBufferSize accommodates transcripts with word timestamps for
+	// clips up to about a minute; longer clips grow the buffer.
 	DefaultSpeechBufferSize = 1 << 18
+	// speechOutputBytesPerSecond bounds transcript JSON per second of audio.
+	speechOutputBytesPerSecond = 4096
 )
 
 // AudioOptions controls language detection, keyword biasing and word timestamps.
@@ -142,8 +143,10 @@ func (w *Whistle) Close() error {
 	return nil
 }
 
-// Transcribe accepts up to 30 seconds of PCM. Empty audio and silence return an
-// empty transcript. Calls are serialized with all text and speech native work.
+// Transcribe accepts PCM of any length: up to 30 seconds runs as one pass, and
+// longer audio runs as consecutive 30 second windows with word times counted
+// from the start of the clip. Empty audio and silence return an empty
+// transcript. Calls are serialized with all text and speech native work.
 func (w *Whistle) Transcribe(ctx context.Context, pcm []float32, options AudioOptions) (Transcript, error) {
 	if err := ctx.Err(); err != nil {
 		return Transcript{}, err
@@ -160,6 +163,7 @@ func (w *Whistle) Transcribe(ctx context.Context, pcm []float32, options AudioOp
 	if err := w.bindLocked(); err != nil {
 		return Transcript{}, err
 	}
+	w.reserve(len(pcm))
 	clear(w.buffer)
 	code := w.runtime.api.transcribe(pcmPointer(pcm), int32(len(pcm)), bytePointer(language), bytePointer(keywords), timestamps, w.buffer, int32(len(w.buffer)))
 	data, err := nativeOutput(w.runtime.api, "transcribe", code, w.buffer)
@@ -216,9 +220,17 @@ func (w *Whistle) Complete(ctx context.Context, textAgent *Agent, pcm []float32,
 	return a.decodeResponse(code)
 }
 
+// reserve grows the output buffer for long clips, as upstream does, so a
+// transcript with word timestamps fits. The caller must hold the runtime mutex.
+func (w *Whistle) reserve(samples int) {
+	if needed := samples / SpeechSampleRate * speechOutputBytesPerSecond; needed > len(w.buffer) {
+		w.buffer = make([]byte, needed)
+	}
+}
+
 func prepareAudio(pcm []float32, options AudioOptions) ([]byte, []byte, int32, error) {
-	if len(pcm) > MaxSpeechSamples {
-		return nil, nil, 0, errors.New("needle: audio exceeds 30 seconds at 16000 Hz")
+	if len(pcm) > math.MaxInt32 {
+		return nil, nil, 0, fmt.Errorf("needle: audio has %d samples; want at most %d", len(pcm), math.MaxInt32)
 	}
 	for i, sample := range pcm {
 		if sample != sample || sample < -1 || sample > 1 {

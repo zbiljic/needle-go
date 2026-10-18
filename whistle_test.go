@@ -213,7 +213,6 @@ func TestWhistleInvalidInputAndErrors(t *testing.T) {
 		pcm     []float32
 		options AudioOptions
 	}{
-		{"too long", make([]float32, MaxSpeechSamples+1), AudioOptions{}},
 		{"NaN", []float32{float32(math.NaN())}, AudioOptions{}},
 		{"infinity", []float32{float32(math.Inf(1))}, AudioOptions{}},
 		{"outside range", []float32{-1.01}, AudioOptions{}},
@@ -305,7 +304,8 @@ func TestNativeWhistle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pcm := range [][]float32{nil, make([]float32, SpeechSampleRate)} {
+	// A 40 s clip exceeds one 30 s window and runs as consecutive windows.
+	for _, pcm := range [][]float32{nil, make([]float32, SpeechSampleRate), make([]float32, 40*SpeechSampleRate)} {
 		transcript, err := w.Transcribe(ctx, pcm, AudioOptions{WordTimestamps: true})
 		if err != nil || transcript.Text != "" || transcript.Language != "" || len(transcript.Words) != 0 {
 			t.Fatalf("silence transcript = %+v, %v", transcript, err)
@@ -405,5 +405,33 @@ func TestWhistleClose(t *testing.T) {
 	}
 	if fake.loads != 0 {
 		t.Fatal("closed Whistle loaded weights")
+	}
+}
+
+func TestWhistleTranscribeGrowsBufferForLongClips(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNative{}
+	_, r := newTestAgent(t, fake, Config{})
+	w := newTestWhistle(t, r)
+	var capacities []int32
+	r.api.transcribe = func(_ *float32, count int32, _, _ *byte, _ int32, out []byte, capacity int32) int32 {
+		if int(capacity) != len(out) {
+			t.Fatalf("capacity %d != buffer %d", capacity, len(out))
+		}
+		capacities = append(capacities, capacity)
+		copy(out, `{"text":"","language":""}`)
+		return 0
+	}
+	ctx := context.Background()
+	for _, seconds := range []int{10, 100, 20} {
+		if _, err := w.Transcribe(ctx, make([]float32, seconds*SpeechSampleRate), AudioOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Short clips use the default buffer; a long clip grows it and the
+	// larger buffer is kept.
+	want := []int32{DefaultSpeechBufferSize, 100 * speechOutputBytesPerSecond, 100 * speechOutputBytesPerSecond}
+	if !reflect.DeepEqual(capacities, want) {
+		t.Fatalf("capacities = %v, want %v", capacities, want)
 	}
 }

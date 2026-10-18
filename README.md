@@ -138,7 +138,7 @@ NEEDLE_TEST_NATIVE=1 go test -run '^TestNativeEmbeddings$' -v .
 ## Speech
 
 `NewWhistle` adds optional speech transcription and audio tool calling with
-Needle 3. It accepts 16 kHz mono `[]float32` PCM, up to 30 seconds. Speech weights
+Needle 3. It accepts 16 kHz mono `[]float32` PCM of any length. Speech weights
 are downloaded only when requested.
 
 See the [speech guide](docs/speech.md) for the API, supported languages and offline

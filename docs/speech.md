@@ -19,8 +19,11 @@ transcript, err := speech.Transcribe(ctx, pcm, needle.AudioOptions{
 })
 ```
 
-Supply mono `[]float32` PCM at 16000 Hz, with finite samples in `[-1, 1]`, up to
-30 seconds. Empty clips and silence return empty text and language. `Language`
+Supply mono `[]float32` PCM at 16000 Hz, with finite samples in `[-1, 1]`, of
+any length: up to 30 seconds runs as one pass, and longer audio runs as
+consecutive 30 second windows with word times counted from the start of the
+clip. The output buffer grows for long clips. Empty clips and silence return
+empty text and language. `Language`
 is empty for detection, or `en`, `de`, `fr`, `es`, `it`, `nl` or `pl`. Transcripts
 include `TTFTMS`, `DecodeTPS`, and optional words with start/end times in seconds
 and probabilities. File decoding, microphone capture and resampling belong to
